@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.DS_Store
+dist/
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.local
+tests/fixtures/transcripts/captured/
