@@ -7,6 +7,11 @@ source "$SCRIPT_DIR/lib/accounting-core.sh"
 source "$SCRIPT_DIR/lib/lease.sh"
 source "$SCRIPT_DIR/lib/render-template.sh"
 
+# Safety-net ERR trap: fires on unset-variable errors, pipeline failures,
+# or explicit non-zero returns from helper functions (set -uo pipefail is active).
+# Flips the active goal to paused/degraded and exits fail-open.
+trap 'pause_as_degraded "${SESSION_ID:-}" 2>/dev/null; lease_release "${SESSION_ID:-}" $$ 2>/dev/null; echo "{\"systemMessage\":\"goal pursuit degraded; see ${CLAUDE_PLUGIN_DATA:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/data/claude-goal}}/logs/\"}"; exit 0' ERR
+
 # Resolve DB path: marker file > CLAUDE_PLUGIN_DATA > hardcoded fallback
 if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir" ]]; then
   PLUGIN_DATA=$(cat "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir")

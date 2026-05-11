@@ -138,6 +138,30 @@ sum_transcript() {
   echo "$tokens_delta|$last_uuid|$end_offset|$cursor_reset|$cap_field"
 }
 
+# pause_as_degraded SESSION_ID
+# Flip an active or budget_limited goal into paused with paused_reason='degraded'.
+# Used as the catch-all when stop.sh hits an unhandled error.
+# Idempotent: if status is already terminal (or already paused), no-op.
+pause_as_degraded() {
+  local session_id="$1"
+  [[ -z "$session_id" ]] && return 0
+  local sid_esc
+  sid_esc=$(sql_escape "$session_id")
+  local now
+  now=$(ms_now)
+  sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
+    BEGIN IMMEDIATE;
+    UPDATE goals SET status = 'paused', paused_reason = 'degraded',
+      time_used_seconds = time_used_seconds + COALESCE(($now - resume_at_ms)/1000, 0),
+      resume_at_ms = NULL, version = version + 1, updated_at_ms = $now
+      WHERE session_id = '$sid_esc' AND status IN ('active','budget_limited');
+    INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_after, pid, created_at_ms)
+      SELECT '$sid_esc', goal_id, 'stop', 'paused_degraded', 'paused', $$, $now
+      FROM goals WHERE session_id = '$sid_esc' AND status = 'paused' AND paused_reason = 'degraded';
+    COMMIT;
+  " >/dev/null 2>&1
+}
+
 # account_advance — DEPRECATED.
 # Multiple sql_retry calls open independent connections so BEGIN IMMEDIATE in one
 # call doesn't carry to the next. Use account_advance_inline instead.
