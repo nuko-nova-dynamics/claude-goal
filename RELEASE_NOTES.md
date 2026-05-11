@@ -1,6 +1,8 @@
 # claude-goal v0.1.0
 
-A Claude Code plugin that ports OpenAI Codex's `/goal` autonomous loop. Type `/goal "objective"` and the agent self-drives turns until the model passes its own completion audit, the token budget exhausts, or a cap fires.
+A Claude Code plugin that ports OpenAI Codex's `/goal` autonomous loop. Type `/goal-start "objective"` and the agent self-drives turns until the model passes its own completion audit, the token budget exhausts, or a cap fires.
+
+**Compatible with Claude Code 2.1.139+'s built-in `/goal`** (which shipped the same day, May 11 2026). The two coexist — use native `/goal` for casual conditions, use this plugin's `/goal-start` for token budgets, pause/resume, `/compact` recovery, and persistence across `claude` restart.
 
 This is a **public beta**. The happy path is real-Claude-validated end-to-end across 5 acceptance scenarios, but it has not yet accumulated outside-user miles. Please file issues against anything surprising.
 

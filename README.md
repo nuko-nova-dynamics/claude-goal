@@ -1,6 +1,26 @@
 # claude-goal
 
-Codex-style autonomous goal loop for Claude Code. Type `/goal "objective"` and the agent self-drives turns until the model passes its own completion audit, the token budget exhausts, or you stop it. Inspired by OpenAI Codex's `/goal` feature.
+Codex-style autonomous goal loop for Claude Code. Type `/goal-start "objective"` and the agent self-drives turns until the model passes its own completion audit, the token budget exhausts, or you stop it. Inspired by OpenAI Codex's `/goal` feature.
+
+## vs Claude Code's built-in `/goal`
+
+Claude Code v2.1.139+ ships a native `/goal` command (session-scoped Stop hook + Haiku evaluator). It's the right choice for casual "work until this condition holds" tasks. `claude-goal` is the production-grade alternative when you need more control:
+
+| | Built-in `/goal` (CC 2.1.139+) | `claude-goal` (this plugin) |
+|---|---|---|
+| Set objective + autonomous continuation | yes | yes |
+| Live elapsed/turns/tokens overlay | yes (built-in UI) | via statusline |
+| Token budget enforcement | phrase it in the condition | `--budget N`, deterministic |
+| Turn cap | phrase it in the condition | 50 default, `--add-continuations N` to extend |
+| Wall-clock cap | phrase it in the condition | 4h default, `--add-hours N` to extend |
+| Pause / resume / abandon | `/goal clear` only | `/goal-pause`, `/goal-resume`, `/goal-abandon` |
+| `/compact` resilience | n/a | `accounting_uncertain` flag + `/goal-reconcile` |
+| Cross-session restart persistence | `--resume` resets counters | SQLite preserves counters |
+| `/clear` handling | auto-removes goal | orphan + `/goal-cleanup` to reap |
+| Preflight self-test | n/a | `/goal-doctor` |
+| Completion judgment | fresh Haiku evaluator per turn | model self-audit via `update_goal` (Haiku-evaluator parity tracked for v0.2) |
+
+The two coexist. Use native `/goal` for quick conditions; use this plugin for production autonomous work where budgets, pauses, and recovery matter.
 
 ## Quickstart
 
@@ -25,7 +45,7 @@ The tarball ships the prebuilt MCP `dist/` plus pruned production runtime depend
 **Start a goal:**
 
 ```
-/goal "list all .ts files under src/ and print a line count for each"
+/goal-start "list all .ts files under src/ and print a line count for each"
 ```
 
 Expected behavior: Claude confirms the goal, begins working, and continues across turns without further prompting. Each turn the Stop hook injects a continuation prompt. When Claude decides the objective is fully met, it calls `update_goal` with `status: "complete"` and stops.
@@ -33,7 +53,7 @@ Expected behavior: Claude confirms the goal, begins working, and continues acros
 **With a token budget:**
 
 ```
-/goal "refactor the auth module to use async/await" --budget 50000
+/goal-start "refactor the auth module to use async/await" --budget 50000
 ```
 
 Claude pauses automatically when `tokens_used` reaches the budget, leaving the goal in `budget_limited` status. Use `/goal-extend` to add more budget.
@@ -42,7 +62,7 @@ Claude pauses automatically when `tokens_used` reaches the budget, leaving the g
 
 | Command | What it does |
 |---|---|
-| `/goal "objective" [--budget N]` | Start a new autonomous goal. Replaces any prior completed/abandoned goal for this session. |
+| `/goal-start "objective" [--budget N]` | Start a new autonomous goal. Replaces any prior completed/abandoned goal for this session. |
 | `/goal-status` | Show current goal, status, tokens used vs budget, continuations remaining, and any warnings. |
 | `/goal-pause` | Pause the goal immediately (user-paused). Claude stops self-driving until you resume. |
 | `/goal-resume` | Resume a user-paused goal. |

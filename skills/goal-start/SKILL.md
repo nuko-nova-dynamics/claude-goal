@@ -1,9 +1,9 @@
 ---
-name: goal
-description: Start a new goal that the agent will pursue autonomously across turns
+name: goal-start
+description: Start a new autonomous goal. The agent self-drives turns until the model passes a completion audit. Complements Claude Code's native /goal by adding deterministic token budgets, pause/resume, /extend, and persistence across restart.
 ---
 
-The user invoked /goal. Parse the arguments below — the objective is the quoted string, optionally followed by `--budget N`.
+The user invoked /goal-start. Parse the arguments below — the objective is the quoted string, optionally followed by `--budget N`.
 
 Arguments: $ARGUMENTS
 

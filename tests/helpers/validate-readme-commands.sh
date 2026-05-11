@@ -5,9 +5,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 README="$REPO_ROOT/README.md"
 MISSING=0
 
-# Extract /goal* command names from backticks in README.
-# Names may have trailing hyphenated suffixes (e.g. /goal-cleanup) but not punctuation/whitespace.
-for cmd in $(grep -oE '`/goal[a-z-]*' "$README" | sort -u | tr -d '`'); do
+# Extract /goal-* command names from backticks in README.
+# Plugin commands are all hyphen-suffixed (e.g. /goal-start, /goal-pause). The bare
+# /goal mentioned in the README refers to Claude Code's native command, NOT this
+# plugin, so we deliberately skip it by requiring at least one hyphen.
+for cmd in $(grep -oE '`/goal-[a-z]+' "$README" | sort -u | tr -d '`'); do
   NAME="${cmd#/}"
   SKILL_FILE="$REPO_ROOT/skills/$NAME/SKILL.md"
   if [[ ! -f "$SKILL_FILE" ]]; then
