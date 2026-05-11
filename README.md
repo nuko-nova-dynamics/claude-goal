@@ -51,8 +51,8 @@ Claude pauses automatically when `tokens_used` reaches the budget, leaving the g
 | `/goal-extend --add-hours N` | Add N hours to a `wall_clock_cap`-paused goal and resume it. |
 | `/goal-reconcile --accept-reset` | Clear the `accounting_uncertain` flag set after `/compact`. Resets token accounting to current transcript cursor and resumes if the goal was paused for that reason. |
 | `/goal-doctor` | Run a preflight self-test: checks SQLite, MCP connectivity, hook registration, and shell dependencies. |
-| `/goal-cleanup --list` | List orphaned goals from sessions where `/clear` was used. (Phase 6.4 — coming in v0.1) |
-| `/goal-cleanup --delete --older-than N` | Delete orphaned goals older than N days. (Phase 6.4 — coming in v0.1) |
+| `/goal-cleanup --list` | List orphaned goals from sessions where `/clear` was used. Shows all by default; pass `--older-than HOURS` to filter. |
+| `/goal-cleanup --delete` | Delete orphaned goals. Defaults to `--older-than 24` to avoid removing fresh paused goals; override with `--older-than HOURS`. |
 
 ## How it works
 

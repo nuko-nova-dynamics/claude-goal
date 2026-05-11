@@ -47,3 +47,17 @@ teardown() {
   run "$CLI" cleanup
   [ "$status" -eq 1 ]
 }
+
+@test "cleanup --list with no --older-than shows fresh orphans (default 0)" {
+  run "$CLI" cleanup --list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"stale-sess"* ]]
+  [[ "$output" == *"fresh-sess"* ]]
+}
+
+@test "cleanup --delete with no --older-than preserves fresh goals (default 24)" {
+  run "$CLI" cleanup --delete
+  [ "$status" -eq 0 ]
+  COUNT_FRESH=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goals WHERE session_id='fresh-sess';")
+  [ "$COUNT_FRESH" = "1" ]
+}

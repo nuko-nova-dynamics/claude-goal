@@ -34,7 +34,8 @@ ADD_CONT=""
 ADD_HOURS=""
 ACCEPT_RESET=0
 CLEANUP_ACTION=""
-CLEANUP_HOURS=24
+CLEANUP_HOURS=""
+CLEANUP_HOURS_EXPLICIT=0
 
 SUBCMD="${1:-}"; shift || true
 
@@ -51,11 +52,20 @@ while (( $# > 0 )); do
     --accept-reset) ACCEPT_RESET=1; shift ;;
     --list) CLEANUP_ACTION="list"; shift ;;
     --delete) CLEANUP_ACTION="delete"; shift ;;
-    --older-than) CLEANUP_HOURS="$2"; shift 2 ;;
-    --older-than=*) CLEANUP_HOURS="${1#*=}"; shift ;;
+    --older-than) CLEANUP_HOURS="$2"; CLEANUP_HOURS_EXPLICIT=1; shift 2 ;;
+    --older-than=*) CLEANUP_HOURS="${1#*=}"; CLEANUP_HOURS_EXPLICIT=1; shift ;;
     *) shift ;;
   esac
 done
+
+# Different default thresholds for --list (show everything) and --delete (be conservative).
+if [[ "$CLEANUP_HOURS_EXPLICIT" = "0" ]]; then
+  if [[ "$CLEANUP_ACTION" = "list" ]]; then
+    CLEANUP_HOURS=0
+  else
+    CLEANUP_HOURS=24
+  fi
+fi
 
 # Resolver order: --session-id flag → CLAUDE_SESSION_ID env → marker file → error
 if [[ -z "$SESSION_ID" && -n "$PLUGIN_ROOT" && -f "$PLUGIN_ROOT/.runtime-session-id" ]]; then
@@ -192,7 +202,7 @@ case "$SUBCMD" in
     ;;
   cleanup)
     if [[ -z "$CLEANUP_ACTION" ]]; then
-      echo "error: cleanup requires --list or --delete; optional --older-than HOURS (default 24)" >&2
+      echo "error: cleanup requires --list or --delete; optional --older-than HOURS (default 0 for --list, 24 for --delete)" >&2
       exit 1
     fi
     # Use ms_now if available, else inline
