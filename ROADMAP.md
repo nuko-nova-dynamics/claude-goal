@@ -1,81 +1,61 @@
 # claude-goal Roadmap
 
-This document tracks the planned evolution of the plugin beyond v0.1.0.
+This document captures what shipped in v0.1.0 and what's planned for later versions.
 
-v0.1.0 is the **production-grade goal-management** layer that complements Claude Code's built-in `/goal` (shipped in CC 2.1.139). Where the built-in is a session-scoped Stop hook plus a Haiku evaluator, this plugin adds deterministic budgets, lifecycle commands (pause/resume/extend/abandon), `/compact` recovery, and SQLite persistence.
+v0.1.0 is the **production-grade goal-management** layer that complements Claude Code's built-in `/goal` (shipped in CC 2.1.139). Where the built-in is a session-scoped Stop hook plus a Haiku evaluator, this plugin adds deterministic budgets, lifecycle commands (pause/resume/extend/abandon), `/compact` recovery, SQLite persistence, an agent-hook evaluator that verifies with tools, and F5 final-turn token accounting.
 
-## v0.2 — headline features
+## v0.1.0 — landed features
 
-### 1. Pluggable evaluator boundary (the big one)
+### 1. Agent-hook evaluator (implemented)
 
-**Status:** designed, not implemented
+**Status:** SHIPPED in `hooks/hooks.json`.
 **Inspired by:** Claude Code's native `/goal` mechanism, with a Codex-flagged architectural correction.
 
-**The real insight** (per Codex, the original `/goal` implementer in `codex-rs`): the win isn't the Haiku model specifically — it's **separating the completion condition from the worker's self-narrative**. A model that has spent N turns working toward an objective has sunk-cost bias to declare done. ANY separate evaluator without that context bias — Haiku, GPT-4o-mini, a local model, or even another instance of the same Claude — beats same-model self-audit. So the v0.2 design is a **pluggable evaluator boundary**, not a Haiku integration.
+**The insight** (per Codex, the original `/goal` implementer in `codex-rs`): the win isn't the Haiku model specifically — it's **separating the completion condition from the worker's self-narrative**. A model that has spent N turns working toward an objective has sunk-cost bias to declare done. ANY separate evaluator without that context bias — Haiku, GPT-4o-mini, a local model, or even another instance of the same Claude — beats same-model self-audit.
 
-**Three transport options for the evaluator boundary** — all achieve the architectural decoupling (fresh context, no sunk-cost bias). v0.2 supports all three, default is the prompt-hook transport (mirrors Anthropic's own design, zero auth setup).
+**What shipped: agent-hook evaluator** in `hooks/hooks.json`. Why agent-hook and not prompt-hook:
 
-### Transport A: prompt hook (default) — mirrors native `/goal`
+The original plan was a prompt-type Stop hook (mirroring Anthropic's native `/goal` mechanism). But reading the Claude Code hooks spec revealed that prompt hooks receive only the fixed input JSON (`session_id`, `transcript_path`, `last_assistant_message`, etc.) and CANNOT read files or call tools. Our active goal's objective lives in our SQLite DB, NOT in CC's hook input. A prompt-hook evaluator literally cannot see what the user asked for.
 
-Claude Code's hooks system has two hook types: **prompt hooks** (make a model call using the session's "small fast model" and return text) and **agent hooks** (spawn a subagent). These are documented as separate first-class mechanisms at https://code.claude.com/docs/en/hooks. Anthropic's native `/goal` is explicitly a prompt hook (*"`/goal` is a wrapper around a session-scoped prompt-based Stop hook"* per https://code.claude.com/docs/en/goal). Plugins can ship prompt hooks too.
+Agent hooks are the right transport: they spawn a subagent with tool access. The subagent gets:
+- A fresh context window, no inherited conversation (no sunk-cost bias)
+- Bash + Read + jq + sqlite3 access — can query our DB for the objective, read the transcript, AND verify with tools (run the test, read the file, check the exit code)
+- Returns `{ ok: bool, reason: string }`
 
-**For our plugin:** add a prompt-type Stop hook in `hooks/hooks.json` whose body is the evaluator prompt template ("Given this objective and the last 3 turns of conversation, is the objective complete? Be conservative — require explicit evidence, not optimistic language. Return `done: true|false, reason: <short>`."). The hook runs after the current `scripts/stop.sh` completes accounting; if `done`, the Stop hook chain transitions to `complete`; if not, continuation injection fires as today with the evaluator's reason appended as guidance.
+Implementation:
+- `hooks/hooks.json` registers a second Stop hook of `type: "agent"` alongside the existing `scripts/stop.sh` command hook. They fire in parallel.
+- The agent prompt (full version at `prompts/evaluator.md`, compact inlined in hooks.json) instructs the subagent through the 6-step evaluation flow.
+- When complete: the subagent calls our MCP `update_goal` tool with `completed_by: "evaluator"`. The MCP tool records a `goal_completed_by_evaluator` event distinct from `goal_completed_by_self_update`. Audit-distinguishable.
+- When not complete: the subagent returns `ok: false` with a one-line reason. The reason is fed back to the worker as next-turn guidance.
+- The two completion paths coexist: worker can self-signal via `update_goal status:complete` (current behavior, `goal_completed_by_self_update`), OR the evaluator can verify and call update_goal itself (`goal_completed_by_evaluator`).
 
-- **Auth:** session credentials — OAuth (most users) or API key, whatever is already configured. Zero setup for the plugin user.
-- **Cost:** the model call only (~few hundred tokens of evaluator input + a one-line output). Negligible vs main-turn spend, same as Anthropic explicitly states for their evaluator.
-- **Model choice:** controlled by Claude Code's `ANTHROPIC_DEFAULT_HAIKU_MODEL` env var or the hook's optional `model: <alias>` field. Defaults to a fast model (Haiku family); users can override to any model alias including Opus.
-- **Limitation:** transcript-only judgment, no tool use. Same as Anthropic's `/goal`.
+**Evaluator prompt is conservative by design** (Codex's warning from `codex-rs` experience): the failure mode is "declares done because progress *sounds* complete." The prompt explicitly says: optimistic language is never proof; require explicit evidence (exit codes, file contents, test reports). Vague "should work now" → return ok:false.
 
-### Transport B: agent hook / subagent dispatch — for tool-using verification
+**Experimental status caveat:** Claude Code's agent-hook type is marked experimental as of v2.1.139. Behavior and configuration may change. Mitigation: the worker self-audit path stays as the always-available signal. If agent-hook regresses, the plugin still works.
 
-When the objective's completion depends on observable state that a transcript can lie about (e.g., "tests pass" but the transcript only contains an optimistic "successfully ran tests" line), use a subagent evaluator instead. Defined via an `agent` hook in `hooks/hooks.json`, the subagent gets:
-- Fresh context window, no inherited conversation
-- File access — can actually run `npm test`, grep, verify state
-- Returns the same yes/no + reason
+### 2. F5 — final-turn tokens at completion (SHIPPED)
 
-**Strictly stronger than Transport A** for state-dependent objectives — the subagent verifies rather than infers. But pricier per turn (full subagent context boot ~tens of thousands of tokens vs the prompt hook's few hundred).
+**Status:** SHIPPED in `scripts/stop.sh` (commit 8a2b90e).
 
-- **Auth:** session credentials — same as Transport A.
-- **Cost:** subagent boot per turn. Higher than prompt hook, much lower than running the main agent again.
-- **Opt-in flag:** `--evaluator subagent` on `/goal-start`.
+The completion turn's tokens are now captured by a bounded retry loop after `detect_update_goal` returns true. Five retries at 100ms intervals re-run `account_advance_inline` to catch transcripts that flush after the start-of-hook accounting pass. Records a `final_turn_accounted` event when the retry advances the byte offset.
 
-### Transport C: external small-fast-model API — for explicit provider control
+## v0.1.0 — phase 2 pending
 
-For users who want a specific provider distinct from their CC session (e.g., they're on Bedrock for the main session but want to route the evaluator to Anthropic API direct), or want to use OpenAI/local models as the evaluator.
+These are also v0.1.0 work, queued behind the audit on phase 1.
 
-- New MCP tool: `evaluate_completion(session_id, objective, recent_transcript)` returning `{ done: bool, reason: string }`. Implementation calls the configured provider.
-- Configuration: `evaluator.provider` in `.claude-plugin/plugin.json` or `--evaluator <name>` flag. Providers: `anthropic-haiku`, `openai-mini`, `local-ollama`.
-- **Auth:** requires the corresponding API key in env. Only path that needs key management.
-- **Use case:** narrow — users who specifically want a different provider from their session.
+### 3. Per-subagent token attribution
 
-### Shared design (both transports)
+Today, subagent tool calls fire `PostToolBatch` on the parent session, so subagent activity rolls into the parent's `tokens_used`. CC 2.1.139 added `x-claude-code-agent-id` / `x-claude-code-parent-agent-id` headers and the `agent_id` / `parent_agent_id` attributes on OTEL spans. Phase 2 reads these from the hook payload and splits accounting into a `subagent_tokens` column on `goals`.
 
-- Stop hook routes through the evaluator after accounting catchup, before continuation injection.
-- Backwards-compatible: `update_goal status=complete` self-audit path still works as a parallel signal.
-- **Distinct event types when evaluator wins vs self-signal wins**: `goal_completed_by_evaluator` carries the verdict + reason in `payload_json`; `goal_completed_by_self_update` is the existing path. Audit-distinguishable.
-- **`--evaluator both` mode safety**: evaluator-driven completion requires reason text PLUS the audit event before transitioning. Prevents either side prematurely stopping without trace.
-
-**Evaluator must be conservative** (Codex's warning from `codex-rs` experience): the failure mode is "declares done because progress *sounds* complete" — e.g., transcript contains "successfully ran tests" but some failed. Both transports' evaluator prompts bias toward "not done" — require explicit evidence (file contents, exit codes, test reports), not optimistic language. Subagent transport has the upper hand here because it can verify with tools instead of trusting the transcript.
-
-**Prerequisite: F5 must land first.** If the evaluator can trigger completion, every evaluator-driven win currently skips the final-turn accounting pass. F5 fix gates v0.2 evaluator rollout.
-
-### 2. `-p` and Remote Control mode support
-
-Anthropic's native `/goal` works in `claude -p` (one-shot) and Remote Control. Our hooks fire in interactive mode but we've never validated the headless / API-driven paths. v0.2 includes one Codex smoke per mode.
-
-### 3. F5 — final-turn tokens at completion
-
-The known undercount where the completion turn's own token cost is never accounted (because Stop hook accounting runs at the START of the hook, before `update_goal` detection, and no further hook fires after `complete`). Fix: run a second accounting pass between `update_goal` detection and the silent-stop exit.
-
-### 4. Per-subagent token attribution
-
-Today, subagent tool calls fire `PostToolBatch` on the parent session, so subagent activity rolls into the parent's `tokens_used`. v0.2: extract `agent_id` / `parent_agent_id` from the hook payload (CC 2.1.139 added these as `x-claude-code-agent-id` / `x-claude-code-parent-agent-id` headers per the release notes) and split accounting into a `subagent_tokens` column.
-
-### 5. `/goal-history` command
+### 4. `/goal-history` command
 
 List past goals for the current session (complete / abandoned / orphaned) with duration, tokens spent, and outcome. Backed by the existing `goals` table — just a new read path.
 
-## v0.3 and beyond — speculative
+### 5. `-p` and Remote Control mode validation
+
+Anthropic's native `/goal` works in `claude -p` (one-shot) and Remote Control. Our hooks fire in interactive mode but we've never validated the headless / API-driven paths. Phase 2 includes a Codex smoke per mode.
+
+## v0.2+ — speculative
 
 - **Multi-objective goals** with per-objective progress tracking: `/goal-start "A=tests pass; B=lint clean; C=doc updated"` then completion needs all three.
 - **Cost preview**: before `/goal-start`, run a tiny Haiku prompt over the objective to estimate "this will likely cost ~N tokens", warn if `--budget` is way under.
@@ -93,7 +73,6 @@ List past goals for the current session (complete / abandoned / orphaned) with d
 
 | Tag | Date | Headline |
 |---|---|---|
-| v0.1.0 | TBD (pending audit + soak) | Initial public beta — goal lifecycle commands, budgets, `/compact` recovery, SQLite persistence |
+| v0.1.0 | TBD (pending audits + soak) | Initial public beta — goal lifecycle commands, budgets, `/compact` recovery, SQLite persistence, F5 final-turn accounting, agent-hook evaluator, per-subagent token attribution, `/goal-history`, `-p`/Remote Control validated |
 | v0.1.x | rolling | Bugfixes from outside-user feedback |
-| v0.2.0 | tentative Q3 2026 | Haiku evaluator, `-p` / Remote Control, F5 fix, per-subagent attribution |
-| v0.3.0 | speculative | Multi-objective, cost preview, web overlay |
+| v0.2.0 | speculative | Multi-objective goals, cost preview, web overlay, marketplace publish |

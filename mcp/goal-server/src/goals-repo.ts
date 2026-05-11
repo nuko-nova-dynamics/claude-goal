@@ -94,7 +94,7 @@ export class GoalsRepo {
     return txn();
   }
 
-  markComplete(session_id: string, goal_id?: string): void {
+  markComplete(session_id: string, goal_id?: string, completedBy: "self_update" | "evaluator" = "self_update"): void {
     const txn = this.db.transaction(() => {
       const g = this.getBySession(session_id);
       if (!g) throw new Error("no goal exists");
@@ -114,7 +114,9 @@ export class GoalsRepo {
         WHERE session_id = ? AND goal_id = ?
       `).run(elapsedSec, now, session_id, g.goal_id);
 
-      this.recordEvent(session_id, g.goal_id, "goal_completed", g.status, "complete", null);
+      // Distinct event types per completion path for audit-trail clarity.
+      const eventType = completedBy === "evaluator" ? "goal_completed_by_evaluator" : "goal_completed_by_self_update";
+      this.recordEvent(session_id, g.goal_id, eventType, g.status, "complete", { completed_by: completedBy });
     });
     txn();
   }

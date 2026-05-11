@@ -57,7 +57,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "update_goal",
-      description: "Update the existing goal. Use this tool only to mark the goal achieved. Set status to 'complete' only when the objective has actually been achieved and no required work remains. Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work.",
+      description: "Update the existing goal. Use this tool only to mark the goal achieved. Set status to 'complete' only when the objective has actually been achieved and no required work remains. Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work. The optional 'completed_by' field distinguishes worker self-audit completion from evaluator-driven completion (the agent-hook evaluator sets it to 'evaluator'; worker model omits it or sends 'self_update').",
       inputSchema: {
         type: "object",
         required: envSessionId ? ["status"] : ["session_id", "status"],
@@ -66,6 +66,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           session_id: { type: "string" },
           goal_id: { type: ["string", "null"] },
           status: { type: "string", enum: ["complete"] },
+          completed_by: { type: "string", enum: ["self_update", "evaluator"] },
         },
       },
     },
@@ -85,7 +86,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       result = handleCreateGoal(repo, args as { session_id: string; objective: string; token_budget: number | null });
       break;
     case "update_goal":
-      result = handleUpdateGoal(repo, args as { session_id: string; goal_id?: string; status: "complete" });
+      result = handleUpdateGoal(repo, args as { session_id: string; goal_id?: string; status: "complete"; completed_by?: "self_update" | "evaluator" });
       break;
     default:
       throw new Error(`unknown tool: ${req.params.name}`);

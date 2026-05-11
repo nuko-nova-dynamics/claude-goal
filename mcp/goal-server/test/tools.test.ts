@@ -79,6 +79,33 @@ describe("update_goal tool", () => {
     expect(out.goal!.status).toBe("complete");
   });
 
+  it("records goal_completed_by_self_update event when completed_by omitted", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    handleUpdateGoal(repo, { session_id: "s1", status: "complete" });
+    const events = repo["db"]
+      .prepare("SELECT event_type FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1")
+      .get() as { event_type: string };
+    expect(events.event_type).toBe("goal_completed_by_self_update");
+  });
+
+  it("records goal_completed_by_evaluator event when completed_by='evaluator'", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    handleUpdateGoal(repo, { session_id: "s1", status: "complete", completed_by: "evaluator" });
+    const events = repo["db"]
+      .prepare("SELECT event_type FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1")
+      .get() as { event_type: string };
+    expect(events.event_type).toBe("goal_completed_by_evaluator");
+  });
+
+  it("rejects unknown completed_by values", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete", completed_by: "bogus" as never });
+    expect(out.error).toMatch(/completed_by must be/);
+  });
+
   it("does not allow budget_limited goals to be overwritten as complete", () => {
     const repo = freshRepo();
     handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: 1000 });
