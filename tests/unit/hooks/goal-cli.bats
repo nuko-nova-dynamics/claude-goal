@@ -65,3 +65,29 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"claude-goal doctor"* ]]
 }
+
+@test "status resolves DB from marker file when CLAUDE_PLUGIN_DATA is unset" {
+  # Create an alternate data dir with its own DB
+  ALT_DATA=$(mktemp -d)
+  ALT_DB="$ALT_DATA/goals.db"
+  sqlite3 "$ALT_DB" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+
+  # Create a plugin root dir and write the marker pointing to ALT_DATA
+  FAKE_ROOT=$(mktemp -d)
+  printf '%s' "$ALT_DATA" > "$FAKE_ROOT/.runtime-data-dir"
+
+  # Insert a sentinel row in the alternate DB
+  NOW=$(python3 -c "import time; print(int(time.time()*1000))")
+  sqlite3 "$ALT_DB" "INSERT INTO goals (session_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES ('test-session', 'g-marker', 'marker-test', 'active', $NOW, $NOW);"
+
+  # Run goal-cli with CLAUDE_PLUGIN_DATA unset; DB_PATH unset; CLAUDE_PLUGIN_ROOT pointing to FAKE_ROOT
+  run env -u CLAUDE_PLUGIN_DATA -u DB_PATH \
+      CLAUDE_PLUGIN_ROOT="$FAKE_ROOT" \
+      CLAUDE_SESSION_ID="test-session" \
+      "$CLI" status --format=json
+  [ "$status" -eq 0 ]
+  OBJ=$(echo "$output" | jq -r '.objective // ""')
+  [ "$OBJ" = "marker-test" ]
+
+  rm -rf "$ALT_DATA" "$FAKE_ROOT"
+}

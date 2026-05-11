@@ -7,8 +7,20 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/log.sh"
 
-# DB_PATH may be pre-set by tests; otherwise derive from CLAUDE_PLUGIN_DATA
-DB_PATH="${DB_PATH:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/claude-goal}/goals.db}"
+# DB_PATH may be pre-set by tests; otherwise resolve plugin data dir via:
+#   1. CLAUDE_PLUGIN_DATA env (set by CC for hooks; NOT set for Bash tool subprocesses)
+#   2. Runtime marker written by session-start.sh on session boot
+#   3. Hardcoded fallback (last resort; likely wrong, but better than crashing)
+if [[ -z "${DB_PATH:-}" ]]; then
+  if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
+    PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
+  elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir" ]]; then
+    PLUGIN_DATA=$(cat "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir")
+  else
+    PLUGIN_DATA="$HOME/.claude/plugins/data/claude-goal"
+  fi
+  DB_PATH="$PLUGIN_DATA/goals.db"
+fi
 SESSION_ID="${CLAUDE_SESSION_ID:-}"
 FORMAT="text"
 ADD_CONT=""

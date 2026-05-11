@@ -8,3 +8,4 @@ dist/
 .env
 .env.local
 tests/fixtures/transcripts/captured/
+.runtime-data-dir

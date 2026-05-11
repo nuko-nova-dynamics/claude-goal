@@ -1,4 +1,5 @@
 ---
+name: goal
 description: Start a new goal that the agent will pursue autonomously across turns
 ---
 

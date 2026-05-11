@@ -30,3 +30,20 @@ setup() {
   run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/user-prompt-expansion.sh"
   [ "$status" -eq 0 ]
 }
+
+@test "expansion hook on namespaced claude-goal:goal emits additionalContext" {
+  INPUT='{"command_name":"claude-goal:goal","session_id":"sess-ns","expanded_prompt":"build something"}'
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/user-prompt-expansion.sh"
+  [ "$status" -eq 0 ]
+  CTX=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext // ""')
+  [[ "$CTX" == *"sess-ns"* ]]
+  EVT=$(echo "$output" | jq -r '.hookSpecificOutput.hookEventName // ""')
+  [ "$EVT" = "UserPromptExpansion" ]
+}
+
+@test "expansion hook on unrelated namespaced command emits no additionalContext" {
+  INPUT='{"command_name":"something:else","session_id":"sess-abc","expanded_prompt":"x"}'
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/user-prompt-expansion.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || ! echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
+}
