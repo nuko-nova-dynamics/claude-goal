@@ -167,15 +167,23 @@ account_advance_inline() {
   local now
   now=$(ms_now)
 
+  # Escaped SQL-safe copies of identifiers.
+  local sid_esc gid_esc
+  sid_esc=$(sql_escape "$session_id")
+  gid_esc=$(sql_escape "$goal_id")
+
   # APPEND path: stream from last_accounted_byte_offset, verifying first uuid matches.
   local result
   result=$(sum_transcript "$transcript" "$byte_offset" "$last_uuid")
   local tokens_delta new_last_uuid end_offset cursor_reset cap_field
   IFS='|' read -r tokens_delta new_last_uuid end_offset cursor_reset cap_field <<< "$result"
 
-  # Cap exceeded — pause the goal as accounting_error.
+  # Cap exceeded on append path — pause the goal as accounting_error.
+  # Fix 1: INSERT gated by WHERE EXISTS so it only fires when UPDATE succeeded.
+  # Fix 2: status guard added to UPDATE so a concurrent pause isn't overwritten.
   if [[ -n "$cap_field" ]]; then
-    sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
+    local RESULT
+    RESULT=$(sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
       BEGIN IMMEDIATE;
       UPDATE goals SET
         status = 'paused',
@@ -184,11 +192,20 @@ account_advance_inline() {
         resume_at_ms = NULL,
         version = version + 1,
         updated_at_ms = $now
-      WHERE session_id = '$(sql_escape "$session_id")' AND version = $version;
+      WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $version
+        AND status IN ('active', 'budget_limited');
       INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, payload_json, pid, created_at_ms)
-        VALUES ('$(sql_escape "$session_id")', '$(sql_escape "$goal_id")', 'accounting-core', 'cap_exceeded', 'active', 'paused', '{\"cap_field\":\"$cap_field\"}', $$, $now);
+        SELECT '$sid_esc', '$gid_esc', 'accounting-core', 'cap_exceeded', 'active', 'paused', '{\"cap_field\":\"$cap_field\"}', $$, $now
+        WHERE EXISTS (
+          SELECT 1 FROM goals
+          WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $((version + 1))
+        );
+      SELECT changes();
       COMMIT;
-    " 2>/dev/null || true
+    " 2>/dev/null || echo "0")
+    if [[ "$RESULT" = "0" ]]; then
+      log_info "post-tool-batch: version_race_lost (cap_exceeded) session_id=$session_id"
+    fi
     return 0
   fi
 
@@ -200,8 +217,11 @@ account_advance_inline() {
     result=$(sum_transcript "$transcript" 0 "")
     IFS='|' read -r tokens_delta new_last_uuid end_offset cursor_reset cap_field <<< "$result"
     # Cap check on full re-sum.
+    # Fix 4: now also inserts paused_accounting_error event, gated by WHERE EXISTS.
+    # Fix 2: status guard added to UPDATE.
     if [[ -n "$cap_field" ]]; then
-      sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
+      local RESULT
+      RESULT=$(sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
         BEGIN IMMEDIATE;
         UPDATE goals SET
           status = 'paused',
@@ -210,9 +230,20 @@ account_advance_inline() {
           resume_at_ms = NULL,
           version = version + 1,
           updated_at_ms = $now
-        WHERE session_id = '$(sql_escape "$session_id")' AND version = $version;
+        WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $version
+          AND status IN ('active', 'budget_limited');
+        INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, payload_json, pid, created_at_ms)
+          SELECT '$sid_esc', '$gid_esc', 'accounting-core', 'paused_accounting_error', 'active', 'paused', '{\"cap_field\":\"$cap_field\",\"cursor_reset\":1}', $$, $now
+          WHERE EXISTS (
+            SELECT 1 FROM goals
+            WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $((version + 1))
+          );
+        SELECT changes();
         COMMIT;
-      " 2>/dev/null || true
+      " 2>/dev/null || echo "0")
+      if [[ "$RESULT" = "0" ]]; then
+        log_info "post-tool-batch: version_race_lost (cap_exceeded cursor_reset) session_id=$session_id"
+      fi
       return 0
     fi
     # MONOTONIC invariant: never decrease tokens_used.
@@ -238,7 +269,10 @@ account_advance_inline() {
   fi
 
   # Single sqlite3 invocation: BEGIN IMMEDIATE ... COMMIT.
-  sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
+  # Fix 1: INSERT uses WHERE EXISTS so it only fires when the UPDATE actually incremented version.
+  # Fix 2: status IN ('active', 'budget_limited') closes the concurrent-pause window.
+  local TX_RESULT
+  TX_RESULT=$(sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
     BEGIN IMMEDIATE;
     UPDATE goals SET
       tokens_used = $new_tokens_used,
@@ -248,9 +282,18 @@ account_advance_inline() {
       version = version + 1,
       updated_at_ms = $now
       $budget_clause
-    WHERE session_id = '$(sql_escape "$session_id")' AND goal_id = '$(sql_escape "$goal_id")' AND version = $version;
+    WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $version
+      AND status IN ('active', 'budget_limited');
     INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, tokens_delta, version_before, version_after, pid, created_at_ms)
-      VALUES ('$(sql_escape "$session_id")', '$(sql_escape "$goal_id")', 'accounting-core', 'tokens_accounted', $tokens_delta, $version, $((version + 1)), $$, $now);
+      SELECT '$sid_esc', '$gid_esc', 'post-tool-batch', 'tokens_accounted', $tokens_delta, $version, $((version + 1)), $$, $now
+      WHERE EXISTS (
+        SELECT 1 FROM goals
+        WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $((version + 1))
+      );
+    SELECT changes();
     COMMIT;
-  " 2>/dev/null || true
+  " 2>/dev/null || echo "0")
+  if [[ "$TX_RESULT" = "0" ]]; then
+    log_info "post-tool-batch: version_race_lost session_id=$session_id"
+  fi
 }
