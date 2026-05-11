@@ -1,0 +1,38 @@
+name: Test
+on:
+  push:
+    branches: [main, 'feature/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  bats:
+    name: Bash hook tests (bats)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats sqlite3 jq uuid-runtime
+      - name: Run unit bats
+        run: bats tests/unit/
+      - name: Run integration bats
+        run: bats tests/integration/
+
+  vitest:
+    name: MCP server tests (vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mcp/goal-server/package-lock.json
+      - name: Install
+        working-directory: mcp/goal-server
+        run: npm ci
+      - name: Test
+        working-directory: mcp/goal-server
+        run: npm test
