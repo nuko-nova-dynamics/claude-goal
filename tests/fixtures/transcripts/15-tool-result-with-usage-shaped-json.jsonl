@@ -1,0 +1,2 @@
+{"type":"tool","uuid":"aaaa0015-0000-0000-0000-000000000001","message":{"role":"tool","content":[{"type":"tool_result","tool_use_id":"tool_xyz","content":"{\"usage\":{\"input_tokens\":99999,\"output_tokens\":88888,\"cache_creation_input_tokens\":77777}}"}]}}
+{"type":"assistant","uuid":"aaaa0015-0000-0000-0000-000000000002","message":{"role":"assistant","usage":{"input_tokens":40,"output_tokens":15},"content":[{"type":"text","text":"Ignored the fake usage in the tool result."}]}}

@@ -1,0 +1,2 @@
+{"type":"summary","uuid":"aaaa0008-0000-0000-0000-000000000001","summary":"Previous conversation compacted."}
+{"type":"assistant","uuid":"aaaa0008-0000-0000-0000-000000000002","message":{"role":"assistant","usage":{"input_tokens":20,"output_tokens":15},"content":[{"type":"text","text":"Continuing after compact."}]}}

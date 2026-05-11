@@ -1,0 +1,3 @@
+{"type":"assistant","uuid":"aaaa0012-0000-0000-0000-000000000001","message":{"role":"assistant","usage":{"input_tokens":200,"output_tokens":150},"content":[{"type":"text","text":"Long conversation..."}]}}
+{"type":"summary","uuid":"aaaa0012-0000-0000-0000-000000000002","summary":"<compact>Previous session summarized into 200 tokens.</compact>"}
+{"type":"assistant","uuid":"aaaa0012-0000-0000-0000-000000000003","message":{"role":"assistant","usage":{"input_tokens":40,"output_tokens":25},"content":[{"type":"text","text":"Continuing after compact boundary."}]}}

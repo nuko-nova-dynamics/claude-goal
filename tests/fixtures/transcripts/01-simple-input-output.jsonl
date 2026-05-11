@@ -1,0 +1,2 @@
+{"type":"user","uuid":"aaaa0001-0000-0000-0000-000000000001","message":{"role":"user","content":[{"type":"text","text":"Hello, world!"}]}}
+{"type":"assistant","uuid":"aaaa0001-0000-0000-0000-000000000002","message":{"role":"assistant","usage":{"input_tokens":10,"output_tokens":20},"content":[{"type":"text","text":"Hi there!"}]}}

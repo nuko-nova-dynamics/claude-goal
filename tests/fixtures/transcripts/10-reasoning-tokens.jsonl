@@ -1,0 +1,1 @@
+{"type":"assistant","uuid":"aaaa0010-0000-0000-0000-000000000001","message":{"role":"assistant","usage":{"input_tokens":100,"output_tokens":80,"reasoning_output_tokens":30},"content":[{"type":"thinking","thinking":"Let me reason through this..."},{"type":"text","text":"Answer after reasoning."}]}}

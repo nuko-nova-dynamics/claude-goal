@@ -1,0 +1,3 @@
+{"type":"assistant","uuid":"aaaa0009-0000-0000-0000-000000000001","message":{"role":"assistant","usage":{"input_tokens":10,"output_tokens":5},"content":[{"type":"text","text":"Before corrupt line."}]}}
+{CORRUPT JSON LINE - this is not valid JSON!!!
+{"type":"assistant","uuid":"aaaa0009-0000-0000-0000-000000000002","message":{"role":"assistant","usage":{"input_tokens":20,"output_tokens":10},"content":[{"type":"text","text":"After corrupt line."}]}}

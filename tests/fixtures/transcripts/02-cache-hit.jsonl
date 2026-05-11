@@ -1,0 +1,2 @@
+{"type":"user","uuid":"aaaa0002-0000-0000-0000-000000000001","message":{"role":"user","content":[{"type":"text","text":"Recall our previous context."}]}}
+{"type":"assistant","uuid":"aaaa0002-0000-0000-0000-000000000002","message":{"role":"assistant","usage":{"input_tokens":50,"cache_read_input_tokens":800,"output_tokens":30},"content":[{"type":"text","text":"Sure!"}]}}

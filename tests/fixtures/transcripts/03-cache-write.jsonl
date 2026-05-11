@@ -1,0 +1,2 @@
+{"type":"user","uuid":"aaaa0003-0000-0000-0000-000000000001","message":{"role":"user","content":[{"type":"text","text":"Cache this system prompt."}]}}
+{"type":"assistant","uuid":"aaaa0003-0000-0000-0000-000000000002","message":{"role":"assistant","usage":{"input_tokens":50,"cache_creation_input_tokens":400,"output_tokens":25},"content":[{"type":"text","text":"Cached!"}]}}
