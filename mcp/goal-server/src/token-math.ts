@@ -23,7 +23,23 @@ const CAP_INPUT = 200_000;
 const CAP_OUTPUT = 100_000;
 const CAP_CACHE_CREATE = 200_000;
 
-export function sumTranscript(text: string, startOffset: number, expectedFirstUuid: string | null): SumResult {
+function lastUuidBeforeOffset(text: string, endOffset: number): string | null {
+  if (endOffset <= 0) return null;
+  const prefix = text.slice(0, endOffset);
+  let lastUuid: string | null = null;
+
+  for (const line of prefix.split("\n")) {
+    if (line.length === 0) continue;
+    let rec: any;
+    try { rec = JSON.parse(line); }
+    catch { continue; }
+    if (rec.uuid) lastUuid = rec.uuid;
+  }
+
+  return lastUuid;
+}
+
+export function sumTranscript(text: string, startOffset: number, expectedPreviousUuid: string | null): SumResult {
   const result: SumResult = {
     tokens_delta: 0,
     last_uuid: null,
@@ -33,21 +49,26 @@ export function sumTranscript(text: string, startOffset: number, expectedFirstUu
     cap_field: null,
   };
 
+  if (startOffset > text.length) {
+    result.cursor_reset = true;
+    return result;
+  }
+
+  if (startOffset > 0 && expectedPreviousUuid !== null) {
+    const previousUuid = lastUuidBeforeOffset(text, startOffset);
+    if (previousUuid !== expectedPreviousUuid) {
+      result.cursor_reset = true;
+      return result;
+    }
+  }
+
   const window = text.slice(startOffset);
   const lines = window.split("\n").filter(l => l.length > 0);
 
-  let firstUuidChecked = false;
   for (const line of lines) {
     let rec: any;
     try { rec = JSON.parse(line); }
     catch { continue; }
-
-    if (!firstUuidChecked && expectedFirstUuid !== null && rec.uuid && rec.uuid !== expectedFirstUuid) {
-      // Cursor invalidated — caller should restart from offset 0
-      result.cursor_reset = true;
-      return result;
-    }
-    firstUuidChecked = true;
 
     if (rec.type === "assistant" && rec.message?.usage) {
       const u: Usage = rec.message.usage;

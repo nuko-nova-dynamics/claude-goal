@@ -43,9 +43,20 @@ describe("sumTranscript", () => {
     expect(r.cursor_reset).toBe(false);
   });
 
-  it("flags cursor_reset on uuid mismatch", () => {
-    const text = JSON.stringify({ type: "assistant", uuid: "x", message: { usage: { input_tokens: 1, output_tokens: 1 } } }) + "\n";
-    const r = sumTranscript(text, 0, "EXPECTED-DIFFERENT-UUID");
+  it("does not flag cursor_reset on normal append after expected previous uuid", () => {
+    const prefix = JSON.stringify({ type: "assistant", uuid: "previous", message: { usage: { input_tokens: 1, output_tokens: 1 } } }) + "\n";
+    const append = JSON.stringify({ type: "assistant", uuid: "next", message: { usage: { input_tokens: 2, output_tokens: 3 } } }) + "\n";
+    const r = sumTranscript(prefix + append, prefix.length, "previous");
+    expect(r.cursor_reset).toBe(false);
+    expect(r.tokens_delta).toBe(5);
+    expect(r.last_uuid).toBe("next");
+  });
+
+  it("flags cursor_reset when the previous uuid before the byte cursor changed", () => {
+    const original = JSON.stringify({ type: "assistant", uuid: "previous", message: { usage: { input_tokens: 1, output_tokens: 1 } } }) + "\n";
+    const rewritten = JSON.stringify({ type: "assistant", uuid: "rewritten", message: { usage: { input_tokens: 1, output_tokens: 1 } } }) + "\n";
+    const append = JSON.stringify({ type: "assistant", uuid: "next", message: { usage: { input_tokens: 2, output_tokens: 3 } } }) + "\n";
+    const r = sumTranscript(rewritten + append, original.length, "previous");
     expect(r.cursor_reset).toBe(true);
   });
 

@@ -33,14 +33,32 @@ tokens_from_jsonl_line() {
   echo $((input + cache_create + output))
 }
 
-# sum_transcript: stream JSONL from start_offset, optionally verify first uuid.
+# last_uuid_before_offset: return the last JSONL uuid before byte offset.
+last_uuid_before_offset() {
+  local transcript="$1"
+  local end_offset="$2"
+  local last_uuid=""
+
+  (( end_offset <= 0 )) && { echo ""; return 0; }
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    local u
+    u=$(printf '%s' "$line" | jq -r '.uuid // ""' 2>/dev/null || echo "")
+    [[ -n "$u" ]] && last_uuid="$u"
+  done < <(head -c "$end_offset" "$transcript")
+
+  echo "$last_uuid"
+}
+
+# sum_transcript: stream JSONL from start_offset, optionally verify previous uuid.
 # Outputs: "tokens_delta|last_uuid|end_offset|cursor_reset|cap_field"
 #   cursor_reset=1 → caller should re-sum from 0 (transcript was compacted/reset)
 #   cap_field non-empty → a per-field cap was exceeded; caller should pause goal
 sum_transcript() {
   local transcript="$1"
   local start_offset="$2"
-  local expected_first_uuid="$3"
+  local expected_previous_uuid="$3"
 
   local tokens_delta=0
   local last_uuid=""
@@ -55,31 +73,33 @@ sum_transcript() {
 
   end_offset=$(wc -c < "$transcript" | tr -d ' ')
 
-  # If we're at or past EOF, check if this is a cursor-reset (file shrank) or genuinely empty.
-  if (( start_offset >= end_offset )); then
-    if (( start_offset > 0 )) && [[ -n "$expected_first_uuid" ]]; then
-      # File shrank — transcript was reset/compacted. Signal cursor_reset.
-      echo "0||$end_offset|1|"
-    else
-      echo "0||$end_offset|0|"
-    fi
+  # File shrank — transcript was reset/compacted. Signal cursor_reset.
+  if (( start_offset > end_offset )); then
+    echo "0||$end_offset|1|"
     return 0
   fi
 
-  local checked_first=0
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-
-    # UUID-based cursor-reset detection: first line's uuid must match expected.
-    if (( checked_first == 0 )) && [[ -n "$expected_first_uuid" ]]; then
-      local first_line_uuid
-      first_line_uuid=$(printf '%s' "$line" | jq -r '.uuid // ""')
-      if [[ -n "$first_line_uuid" && "$first_line_uuid" != "$expected_first_uuid" ]]; then
-        echo "0||$end_offset|1|"
-        return 0
-      fi
+  # Verify that the byte cursor still points immediately after the last UUID
+  # we accounted. The first record after the cursor is normally new appended
+  # data, so comparing that record to the previous UUID would false-positive
+  # on every ordinary append.
+  if (( start_offset > 0 )) && [[ -n "$expected_previous_uuid" ]]; then
+    local previous_uuid
+    previous_uuid=$(last_uuid_before_offset "$transcript" "$start_offset")
+    if [[ "$previous_uuid" != "$expected_previous_uuid" ]]; then
+      echo "0||$end_offset|1|"
+      return 0
     fi
-    checked_first=1
+  fi
+
+  # At EOF with a valid cursor: nothing new to account.
+  if (( start_offset == end_offset )); then
+    echo "0||$end_offset|0|"
+    return 0
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
 
     # Per-field cap check for assistant messages.
     local type
