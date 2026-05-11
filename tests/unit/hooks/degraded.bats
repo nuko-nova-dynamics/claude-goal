@@ -29,6 +29,13 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   [[ "$STATUS" == "paused|degraded" ]]
 }
 
+@test "pause_as_degraded does not duplicate paused_degraded event on second call" {
+  pause_as_degraded "s1"
+  pause_as_degraded "s1"
+  COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='paused_degraded' AND session_id='s1';")
+  [ "$COUNT" = "1" ]
+}
+
 @test "pause_as_degraded is no-op when session does not exist" {
   pause_as_degraded "nonexistent-session"
   # Original active goal should be untouched

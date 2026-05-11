@@ -157,7 +157,8 @@ pause_as_degraded() {
       WHERE session_id = '$sid_esc' AND status IN ('active','budget_limited');
     INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_after, pid, created_at_ms)
       SELECT '$sid_esc', goal_id, 'stop', 'paused_degraded', 'paused', $$, $now
-      FROM goals WHERE session_id = '$sid_esc' AND status = 'paused' AND paused_reason = 'degraded';
+      FROM goals WHERE session_id = '$sid_esc'
+        AND (SELECT changes()) = 1;
     COMMIT;
   " >/dev/null 2>&1
 }

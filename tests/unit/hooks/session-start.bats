@@ -103,6 +103,22 @@ teardown() {
   [[ "$output" == *"not writable"* ]]
 }
 
+@test "SessionStart preflight creates missing plugin data dir when writable" {
+  MISSING_PLUGIN_DATA="$TMPDIR_TEST/missing-plugin-data"
+  mkdir -p "$TMPDIR_TEST/home"
+  printf '%s' "$MISSING_PLUGIN_DATA" > "$TMPDIR_TEST/.runtime-data-dir"
+
+  [ ! -e "$MISSING_PLUGIN_DATA" ]
+  run env -u CLAUDE_PLUGIN_DATA -u DB_PATH \
+    HOME="$TMPDIR_TEST/home" \
+    CLAUDE_PLUGIN_ROOT="$TMPDIR_TEST" \
+    bash -c "echo '{\"session_id\":\"s1\",\"source\":\"startup\"}' | '$REPO_ROOT/scripts/session-start.sh'"
+
+  [ "$status" -eq 0 ]
+  [ -d "$MISSING_PLUGIN_DATA" ]
+  [[ "$output" != *"not writable"* ]]
+}
+
 # ---------------------------------------------------------------------------
 # 6. Windows native: exits early with systemMessage, no DB changes
 # ---------------------------------------------------------------------------

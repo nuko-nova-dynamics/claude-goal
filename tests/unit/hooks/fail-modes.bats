@@ -6,6 +6,7 @@
 setup() {
   TMPDIR_TEST=$(mktemp -d)
   export CLAUDE_PLUGIN_DATA="$TMPDIR_TEST"
+  export DB_PATH="$TMPDIR_TEST/goals.db"
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export REPO_ROOT CLAUDE_PLUGIN_ROOT="$REPO_ROOT"
 
@@ -16,7 +17,7 @@ setup() {
   printf '%s' "$TMPDIR_TEST" > "$REPO_ROOT/.runtime-data-dir"
 
   # Create schema at the path the scripts will resolve to: $TMPDIR_TEST/goals.db
-  sqlite3 "$TMPDIR_TEST/goals.db" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql" >/dev/null 2>&1
+  sqlite3 "$DB_PATH" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql" >/dev/null 2>&1
 }
 
 teardown() {
@@ -50,14 +51,11 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-@test "stop hook never emits non-JSON to stdout on degraded path" {
-  # Corrupt the DB to simulate a degraded state
-  echo "GARBAGE NOT SQLITE" > "$TMPDIR_TEST/goals.db"
+@test "stop hook emits systemMessage on DB corruption" {
+  echo "GARBAGE NOT SQLITE" > "$DB_PATH"
   INPUT='{"session_id":"s1","transcript_path":"/dev/null","stop_hook_active":false}'
   run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
   [ "$status" -eq 0 ]
-  # If anything was emitted to stdout, it MUST parse as JSON
-  if [[ -n "$output" ]]; then
-    echo "$output" | jq -e '.' >/dev/null
-  fi
+  [[ "$output" == *"systemMessage"* ]]
+  echo "$output" | jq -e '.systemMessage' >/dev/null
 }

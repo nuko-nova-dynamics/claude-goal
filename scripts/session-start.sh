@@ -35,8 +35,9 @@ DB_PATH="${DB_PATH:-$PLUGIN_DATA/goals.db}"
 # Preflight: plugin data dir must be writable.
 # On failure emit a systemMessage and exit clean (degraded mode).
 # ---------------------------------------------------------------------------
+mkdir -p "$PLUGIN_DATA" 2>/dev/null
 if ! touch "$PLUGIN_DATA/.preflight-test" 2>/dev/null; then
-  echo "{\"systemMessage\":\"claude-goal: \${CLAUDE_PLUGIN_DATA:-$PLUGIN_DATA} not writable; goal logic skipped\"}"
+  echo "{\"systemMessage\":\"claude-goal: ${CLAUDE_PLUGIN_DATA} not writable; goal logic skipped\"}"
   exit 0
 fi
 rm -f "$PLUGIN_DATA/.preflight-test"

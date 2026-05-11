@@ -116,6 +116,13 @@ ROW_JSON=$(sqlite3 -bail -json -cmd ".timeout 5000" "$DB_PATH" "
   LIMIT 1;
 " 2>/dev/null || echo "[]")
 if ! echo "$ROW_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+  if [[ -s "$DB_PATH" ]]; then
+    if ! sqlite3 "$DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='goals';" >/dev/null 2>&1; then
+      log_error "stop: DB appears corrupt"
+      echo '{"systemMessage":"claude-goal: DB corruption detected; see logs/"}'
+      exit 0
+    fi
+  fi
   exit 0
 fi
 
