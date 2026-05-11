@@ -3,6 +3,5 @@
   "version": "0.1.0",
   "description": "Codex-style autonomous goal loop. /goal \"objective\" runs the agent until the model passes its own completion audit.",
   "author": { "name": "nuko-nova-dynamics" },
-  "mcpServers": "./.mcp.json",
-  "hooks": "./hooks/hooks.json"
+  "mcpServers": "./.mcp.json"
 }
