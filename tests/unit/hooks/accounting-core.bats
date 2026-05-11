@@ -30,6 +30,20 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   [ "$UUID" = "u3" ]
 }
 
+@test "advance() is idempotent when transcript has no new content" {
+  account_advance_inline "s1" "$TRANSCRIPT"
+  BEFORE=$(sqlite3 "$DB_PATH" "SELECT last_accounted_uuid || '|' || last_accounted_byte_offset || '|' || tokens_used || '|' || version FROM goals WHERE session_id='s1';")
+  EVENTS_BEFORE=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE session_id='s1' AND event_type='tokens_accounted';")
+
+  account_advance_inline "s1" "$TRANSCRIPT"
+
+  AFTER=$(sqlite3 "$DB_PATH" "SELECT last_accounted_uuid || '|' || last_accounted_byte_offset || '|' || tokens_used || '|' || version FROM goals WHERE session_id='s1';")
+  EVENTS_AFTER=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE session_id='s1' AND event_type='tokens_accounted';")
+  [ "$AFTER" = "$BEFORE" ]
+  [ "$EVENTS_BEFORE" = "1" ]
+  [ "$EVENTS_AFTER" = "1" ]
+}
+
 @test "sum_transcript accounts final JSONL record without trailing newline" {
   printf '%s' '{"type":"assistant","uuid":"u1","message":{"usage":{"input_tokens":5,"output_tokens":7}}}' > "$TRANSCRIPT"
   RESULT=$(sum_transcript "$TRANSCRIPT" 0 "")

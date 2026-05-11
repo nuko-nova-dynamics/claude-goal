@@ -89,6 +89,19 @@ EOF
   [[ "$ROW" == "paused|continuation_cap" ]]
 }
 
+@test "stop hook flips to paused on wall_clock_cap and records event" {
+  PAST=$((NOW - 5000))
+  sqlite3 "$DB_PATH" "UPDATE goals SET resume_at_ms=$PAST, max_wall_clock_seconds=1 WHERE session_id='s1';"
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":false}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  ROW=$(sqlite3 "$DB_PATH" "SELECT status, paused_reason FROM goals;")
+  [[ "$ROW" == "paused|wall_clock_cap" ]]
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='cap_reached' AND status_before='active' AND status_after='paused';")
+  [ "$EVENTS" = "1" ]
+}
+
 @test "stop hook injects budget-limit one-shot when budget_limited" {
   sqlite3 "$DB_PATH" "UPDATE goals SET status='budget_limited', budget_limit_reported=0 WHERE session_id='s1';"
   INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":false}"
@@ -106,6 +119,20 @@ EOF
   run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "stop hook detects namespaced update_goal in last three assistant messages and skips injection" {
+  cat > "$TRANSCRIPT" <<'EOF'
+{"type":"assistant","uuid":"u1","message":{"content":[{"type":"text","text":"preparing final update"}]}}
+{"type":"assistant","uuid":"u2","message":{"content":[{"type":"tool_use","name":"mcp__plugin_claude-goal_goal__update_goal","input":{"status":"complete"}}]}}
+{"type":"assistant","uuid":"u3","message":{"content":[{"type":"text","text":"completion tool call was issued"}]}}
+EOF
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":false}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals;")
+  [ "$REM" = "50" ]
 }
 
 @test "stop hook detects update_goal in transcript and skips injection" {
@@ -137,4 +164,33 @@ EOF
   [[ "$output" == *'"decision":"block"'* ]]
   # Reason field should contain the objective content; SQL injection blocked
   echo "$output" | jq -e '.reason | test("it.s a goal")' >/dev/null
+}
+
+@test "stop hook preserves objective pipes through JSON row parsing" {
+  sqlite3 "$DB_PATH" "UPDATE goals SET objective='line one | line two' WHERE session_id='s1';"
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":false}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"decision":"block"'* ]]
+  echo "$output" | jq -e '.reason | contains("line one | line two")' >/dev/null
+}
+
+@test "stop hook exits silently when continuation decrement version race is lost" {
+  sqlite3 "$DB_PATH" "
+    CREATE TRIGGER bump_goal_version_after_lease
+    AFTER INSERT ON continuation_leases
+    BEGIN
+      UPDATE goals SET version = version + 1 WHERE session_id = NEW.session_id;
+    END;
+  "
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":false}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals WHERE session_id='s1';")
+  [ "$REM" = "50" ]
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='continuation_injected';")
+  [ "$EVENTS" = "0" ]
+  LEASES=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM continuation_leases WHERE session_id='s1';")
+  [ "$LEASES" = "0" ]
 }

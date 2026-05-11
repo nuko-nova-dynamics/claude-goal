@@ -37,6 +37,13 @@ latest_assistant_uuid() {
   grep '"type":"assistant"' "$transcript" 2>/dev/null | tail -1 | jq -r '.uuid // ""' 2>/dev/null || true
 }
 
+sql_change_count() {
+  local sql_output="$1"
+  local changes
+  changes=$(printf '%s\n' "$sql_output" | awk '/^[[:space:]]*[0-9]+[[:space:]]*$/ { value=$1 } END { if (value != "") print value; else print "0" }')
+  printf '%s' "$changes"
+}
+
 # Recursion guard: stop_hook_active=true is present on normal block-driven
 # continuation turns too. Treat it as recursive only when Claude re-enters Stop
 # without a newer assistant message since our last accounting cursor.
@@ -67,11 +74,17 @@ account_advance_inline "$SESSION_ID" "$TRANSCRIPT" || log_error "stop: accountin
 detect_update_goal() {
   local transcript="$1"
   [[ ! -r "$transcript" ]] && return 1
-  local last_assistant
-  last_assistant=$(grep '"type":"assistant"' "$transcript" 2>/dev/null | tail -1)
-  [[ -z "$last_assistant" ]] && return 1
+  local recent_assistant
+  recent_assistant=$(jq -c 'select(.type == "assistant")' "$transcript" 2>/dev/null | tail -3)
+  [[ -z "$recent_assistant" ]] && return 1
   # Match suffix to handle MCP namespacing (mcp__plugin_claude-goal__update_goal etc.)
-  echo "$last_assistant" | jq -e '.message.content // [] | map(select(.type == "tool_use" and (.name | test("(^|[^a-z_])update_goal$")))) | length > 0' >/dev/null 2>&1
+  printf '%s\n' "$recent_assistant" | jq -s -e '
+    any(.[]; ((.message.content // []) | if type == "array" then
+      any(.[]; .type == "tool_use" and ((.name // "") | test("update_goal$")))
+    else
+      false
+    end))
+  ' >/dev/null 2>&1
 }
 
 if detect_update_goal "$TRANSCRIPT"; then
@@ -80,10 +93,38 @@ if detect_update_goal "$TRANSCRIPT"; then
 fi
 
 # Step C: re-read goal state after catchup (may have transitioned to budget_limited)
-ROW=$(sql_retry "SELECT goal_id || '|' || objective || '|' || status || '|' || COALESCE(token_budget, '') || '|' || tokens_used || '|' || time_used_seconds || '|' || COALESCE(resume_at_ms, '0') || '|' || continuations_remaining || '|' || max_wall_clock_seconds || '|' || budget_limit_reported || '|' || version FROM goals WHERE session_id = '$SESSION_ID_ESC';" 2>/dev/null || echo "")
-[[ -z "$ROW" ]] && exit 0
+ROW_JSON=$(sqlite3 -bail -json -cmd ".timeout 5000" "$DB_PATH" "
+  SELECT
+    goal_id,
+    objective,
+    status,
+    token_budget,
+    tokens_used,
+    time_used_seconds,
+    COALESCE(resume_at_ms, 0) AS resume_at_ms,
+    continuations_remaining,
+    max_wall_clock_seconds,
+    budget_limit_reported,
+    version
+  FROM goals
+  WHERE session_id = '$SESSION_ID_ESC'
+  LIMIT 1;
+" 2>/dev/null || echo "[]")
+if ! echo "$ROW_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+  exit 0
+fi
 
-IFS='|' read -r GOAL_ID OBJECTIVE STATUS TOKEN_BUDGET TOKENS_USED TIME_USED RESUME_AT CONT_REM MAX_WALL BL_REPORTED VERSION <<< "$ROW"
+GOAL_ID=$(echo "$ROW_JSON" | jq -r '.[0].goal_id // ""')
+OBJECTIVE=$(echo "$ROW_JSON" | jq -r '.[0].objective // ""')
+STATUS=$(echo "$ROW_JSON" | jq -r '.[0].status // ""')
+TOKEN_BUDGET=$(echo "$ROW_JSON" | jq -r '.[0].token_budget // ""')
+TOKENS_USED=$(echo "$ROW_JSON" | jq -r '.[0].tokens_used // 0')
+TIME_USED=$(echo "$ROW_JSON" | jq -r '.[0].time_used_seconds // 0')
+RESUME_AT=$(echo "$ROW_JSON" | jq -r '.[0].resume_at_ms // 0')
+CONT_REM=$(echo "$ROW_JSON" | jq -r '.[0].continuations_remaining // 0')
+MAX_WALL=$(echo "$ROW_JSON" | jq -r '.[0].max_wall_clock_seconds // 0')
+BL_REPORTED=$(echo "$ROW_JSON" | jq -r '.[0].budget_limit_reported // 0')
+VERSION=$(echo "$ROW_JSON" | jq -r '.[0].version // 0')
 GOAL_ID_ESC=$(sql_escape "$GOAL_ID")
 
 case "$STATUS" in
@@ -95,7 +136,6 @@ case "$STATUS" in
     ;;
   budget_limited)
     if [[ "$BL_REPORTED" = "0" ]]; then
-      sql_retry "UPDATE goals SET budget_limit_reported = 1, last_continuation_at_ms = $NOW, version = version + 1 WHERE session_id = '$SESSION_ID_ESC' AND version = $VERSION;"
       export OBJECTIVE_RAW="$OBJECTIVE"
       export TOKENS_USED="$TOKENS_USED"
       export TOKEN_BUDGET="${TOKEN_BUDGET:-none}"
@@ -104,8 +144,29 @@ case "$STATUS" in
       export BUDGET_WARNING=""
       REASON=$(render_template "$PROMPTS_DIR/budget-limit.md")
       JSON=$(jq -n --arg r "$REASON" '{decision:"block",reason:$r}')
-      if echo "$JSON" | jq -e '.decision == "block" and (.reason | length > 0)' >/dev/null 2>&1; then
+      if ! echo "$JSON" | jq -e '.decision == "block" and (.reason | length > 0)' >/dev/null 2>&1; then
+        log_error "stop: budget-limit JSON failed validation; allowing stop"
+        lease_release "$SESSION_ID" $$
+        exit 0
+      fi
+      UPDATE_RESULT=$(sql_retry "
+        BEGIN IMMEDIATE;
+        UPDATE goals SET
+          budget_limit_reported = 1,
+          last_continuation_at_ms = $NOW,
+          version = version + 1
+        WHERE session_id = '$SESSION_ID_ESC'
+          AND goal_id = '$GOAL_ID_ESC'
+          AND version = $VERSION
+          AND budget_limit_reported = 0;
+        SELECT changes();
+        COMMIT;
+      " 2>/dev/null || echo "0")
+      UPDATE_CHANGES=$(sql_change_count "$UPDATE_RESULT")
+      if [[ "$UPDATE_CHANGES" = "1" ]]; then
         echo "$JSON"
+      else
+        lease_release "$SESSION_ID" $$
       fi
     fi
     exit 0
@@ -124,21 +185,56 @@ fi
 TOTAL_WALL=$(( TIME_USED + ACTIVE_ELAPSED ))
 
 if (( CONT_REM <= 0 )); then
-  sql_retry "UPDATE goals SET status = 'paused', paused_reason = 'continuation_cap',
-    time_used_seconds = time_used_seconds + $ACTIVE_ELAPSED, resume_at_ms = NULL,
-    version = version + 1, updated_at_ms = $NOW
-    WHERE session_id = '$SESSION_ID_ESC' AND version = $VERSION;
+  CAP_RESULT=$(sql_retry "
+    BEGIN IMMEDIATE;
+    UPDATE goals SET status = 'paused', paused_reason = 'continuation_cap',
+      time_used_seconds = time_used_seconds + $ACTIVE_ELAPSED, resume_at_ms = NULL,
+      version = version + 1, updated_at_ms = $NOW
+      WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC' AND version = $VERSION;
+    SELECT changes();
     INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, pid, created_at_ms)
-    SELECT '$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'cap_reached', 'active', 'paused', $$, $NOW
-    WHERE EXISTS (SELECT 1 FROM goals WHERE session_id = '$SESSION_ID_ESC' AND version = $((VERSION + 1)));"
+      SELECT '$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'cap_reached', 'active', 'paused', $$, $NOW
+      WHERE EXISTS (
+        SELECT 1 FROM goals
+        WHERE session_id = '$SESSION_ID_ESC'
+          AND goal_id = '$GOAL_ID_ESC'
+          AND version = $((VERSION + 1))
+          AND status = 'paused'
+          AND paused_reason = 'continuation_cap'
+      );
+    COMMIT;
+  " 2>/dev/null || echo "0")
+  CAP_CHANGES=$(sql_change_count "$CAP_RESULT")
+  if [[ "$CAP_CHANGES" != "1" ]]; then
+    log_info "stop: continuation_cap race lost"
+  fi
   exit 0
 fi
 
 if (( TOTAL_WALL > MAX_WALL )); then
-  sql_retry "UPDATE goals SET status = 'paused', paused_reason = 'wall_clock_cap',
-    time_used_seconds = time_used_seconds + $ACTIVE_ELAPSED, resume_at_ms = NULL,
-    version = version + 1, updated_at_ms = $NOW
-    WHERE session_id = '$SESSION_ID_ESC' AND version = $VERSION;"
+  CAP_RESULT=$(sql_retry "
+    BEGIN IMMEDIATE;
+    UPDATE goals SET status = 'paused', paused_reason = 'wall_clock_cap',
+      time_used_seconds = time_used_seconds + $ACTIVE_ELAPSED, resume_at_ms = NULL,
+      version = version + 1, updated_at_ms = $NOW
+      WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC' AND version = $VERSION;
+    SELECT changes();
+    INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, pid, created_at_ms)
+      SELECT '$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'cap_reached', 'active', 'paused', $$, $NOW
+      WHERE EXISTS (
+        SELECT 1 FROM goals
+        WHERE session_id = '$SESSION_ID_ESC'
+          AND goal_id = '$GOAL_ID_ESC'
+          AND version = $((VERSION + 1))
+          AND status = 'paused'
+          AND paused_reason = 'wall_clock_cap'
+      );
+    COMMIT;
+  " 2>/dev/null || echo "0")
+  CAP_CHANGES=$(sql_change_count "$CAP_RESULT")
+  if [[ "$CAP_CHANGES" != "1" ]]; then
+    log_info "stop: wall_clock_cap race lost"
+  fi
   exit 0
 fi
 
@@ -149,11 +245,22 @@ if ! lease_acquire "$SESSION_ID" "$GOAL_ID" $$; then
 fi
 
 # Decrement counter atomically (with version guard)
-sql_retry "UPDATE goals SET
-  continuations_remaining = continuations_remaining - 1,
-  last_continuation_at_ms = $NOW,
-  version = version + 1
-  WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC' AND version = $VERSION;"
+DECREMENT_RESULT=$(sql_retry "
+  BEGIN IMMEDIATE;
+  UPDATE goals SET
+    continuations_remaining = continuations_remaining - 1,
+    last_continuation_at_ms = $NOW,
+    version = version + 1
+    WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC' AND version = $VERSION;
+  SELECT changes();
+  COMMIT;
+" 2>/dev/null || echo "0")
+DECREMENT_CHANGES=$(sql_change_count "$DECREMENT_RESULT")
+if [[ "$DECREMENT_CHANGES" != "1" ]]; then
+  log_info "stop: continuation decrement race lost"
+  lease_release "$SESSION_ID" $$
+  exit 0
+fi
 
 # Compute remaining tokens + budget warning
 REMAINING="unbounded"

@@ -178,6 +178,12 @@ account_advance_inline() {
   local tokens_delta new_last_uuid end_offset cursor_reset cap_field
   IFS='|' read -r tokens_delta new_last_uuid end_offset cursor_reset cap_field <<< "$result"
 
+  # Idempotent no-op: cursor is already at EOF and no new token-bearing
+  # content was found. Do not bump version, clear UUIDs, or emit events.
+  if (( cursor_reset == 0 && tokens_delta == 0 && end_offset == byte_offset )); then
+    return 0
+  fi
+
   # Cap exceeded on append path — pause the goal as accounting_error.
   # Fix 1: INSERT gated by WHERE EXISTS so it only fires when UPDATE succeeded.
   # Fix 2: status guard added to UPDATE so a concurrent pause isn't overwritten.
@@ -255,9 +261,10 @@ account_advance_inline() {
     accounting_uncertain=1
   fi
 
-  # Determine last_accounted_uuid SQL expression.
-  local new_uuid_sql="NULL"
-  [[ -n "$new_last_uuid" ]] && new_uuid_sql="'$(sql_escape "$new_last_uuid")'"
+  # Only write last_accounted_uuid when the transcript window produced one.
+  # This keeps no-token/non-UUID windows from clearing the previous cursor.
+  local last_uuid_clause=""
+  [[ -n "$new_last_uuid" ]] && last_uuid_clause="last_accounted_uuid = '$(sql_escape "$new_last_uuid")',"
 
   # Atomic budget transition: flip to budget_limited in the same UPDATE.
   local budget_clause=""
@@ -277,7 +284,7 @@ account_advance_inline() {
     UPDATE goals SET
       tokens_used = $new_tokens_used,
       last_accounted_byte_offset = $end_offset,
-      last_accounted_uuid = $new_uuid_sql,
+      $last_uuid_clause
       accounting_uncertain = $accounting_uncertain,
       version = version + 1,
       updated_at_ms = $now
