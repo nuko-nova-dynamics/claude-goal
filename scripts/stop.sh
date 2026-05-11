@@ -188,7 +188,34 @@ case "$STATUS" in
     ;;
   active)
     if detect_update_goal "$TRANSCRIPT"; then
-      log_info "stop: update_goal detected in transcript; skipping continuation"
+      log_info "stop: update_goal detected in transcript; running F5 final-turn accounting"
+      # F5 fix: the completion turn's tokens may not yet be in the transcript at the
+      # start-of-hook accounting pass (line 122). Retry with brief sleeps to let
+      # Claude Code flush the transcript, then re-account. Bounded so a slow flush
+      # doesn't hang the hook. Captures tokens that would otherwise be lost because
+      # no further hook invocation fires after the goal transitions to complete.
+      BEFORE_OFFSET="$LAST_ACCOUNTED_OFFSET"
+      for retry in 1 2 3 4 5; do
+        sleep 0.1
+        account_advance_inline "$SESSION_ID" "$TRANSCRIPT" 2>/dev/null || true
+        AFTER_OFFSET=$(sql_retry "SELECT COALESCE(last_accounted_byte_offset, 0) FROM goals WHERE session_id = '$SESSION_ID_ESC';" 2>/dev/null || echo "0")
+        if [[ "$AFTER_OFFSET" != "$BEFORE_OFFSET" ]]; then
+          log_info "stop: F5 caught additional tokens after ${retry} retry (offset $BEFORE_OFFSET -> $AFTER_OFFSET)"
+          BEFORE_OFFSET="$AFTER_OFFSET"
+          # Continue looping in case more turns flush
+        fi
+      done
+      # Record an explicit F5 event so the audit trail shows the final-turn account ran
+      sql_retry "INSERT INTO goal_events
+        (session_id, goal_id, hook_name, event_type, status_before, status_after,
+         version_before, version_after, pid, created_at_ms)
+        SELECT '$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'final_turn_accounted',
+          'active', 'active', $VERSION, $VERSION, $$, $NOW
+        WHERE EXISTS (
+          SELECT 1 FROM goals WHERE session_id = '$SESSION_ID_ESC'
+            AND goal_id = '$GOAL_ID_ESC'
+            AND last_accounted_byte_offset > $LAST_ACCOUNTED_OFFSET
+        );" 2>/dev/null || true
       exit 0
     fi
     ;;
