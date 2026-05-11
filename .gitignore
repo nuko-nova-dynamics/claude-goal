@@ -10,3 +10,4 @@ dist/
 tests/fixtures/transcripts/captured/
 .runtime-data-dir
 .runtime-session-id
+claude-goal-v*.tar.gz
