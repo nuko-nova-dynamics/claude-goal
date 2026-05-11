@@ -13,31 +13,40 @@ v0.1.0 is the **production-grade goal-management** layer that complements Claude
 
 **The real insight** (per Codex, the original `/goal` implementer in `codex-rs`): the win isn't the Haiku model specifically — it's **separating the completion condition from the worker's self-narrative**. A model that has spent N turns working toward an objective has sunk-cost bias to declare done. ANY separate evaluator without that context bias — Haiku, GPT-4o-mini, a local model, or even another instance of the same Claude — beats same-model self-audit. So the v0.2 design is a **pluggable evaluator boundary**, not a Haiku integration.
 
-**Two transport options for the evaluator boundary** — both achieve the same architectural decoupling, with different trade-offs. v0.2 supports both, default is subagent (no auth setup needed).
+**Three transport options for the evaluator boundary** — all achieve the architectural decoupling (fresh context, no sunk-cost bias). v0.2 supports all three, default is the prompt-hook transport (mirrors Anthropic's own design, zero auth setup).
 
-### Transport A: subagent dispatch (default)
+### Transport A: prompt hook (default) — mirrors native `/goal`
 
-The Stop hook injects a continuation prompt instructing the working model to dispatch a `goal-evaluator` subagent before continuing. The subagent gets:
-- A fresh context window (no inherited conversation)
-- The objective text
-- File access (so it can actually run tests, grep files, verify state)
-- Instructions to return yes/no + reason
+Claude Code's hooks system has two hook types: **prompt hooks** (make a model call using the session's "small fast model" and return text) and **agent hooks** (spawn a subagent). These are documented as separate first-class mechanisms at https://code.claude.com/docs/en/hooks. Anthropic's native `/goal` is explicitly a prompt hook (*"`/goal` is a wrapper around a session-scoped prompt-based Stop hook"* per https://code.claude.com/docs/en/goal). Plugins can ship prompt hooks too.
 
-The subagent's verdict drives the next turn: "yes" → call `update_goal complete`; "no" → keep working with the reason as guidance.
+**For our plugin:** add a prompt-type Stop hook in `hooks/hooks.json` whose body is the evaluator prompt template ("Given this objective and the last 3 turns of conversation, is the objective complete? Be conservative — require explicit evidence, not optimistic language. Return `done: true|false, reason: <short>`."). The hook runs after the current `scripts/stop.sh` completes accounting; if `done`, the Stop hook chain transitions to `complete`; if not, continuation injection fires as today with the evaluator's reason appended as guidance.
 
-**Why this is stronger than Anthropic's design**: Anthropic's Haiku evaluator explicitly cannot call tools — it judges only from transcript text. A subagent evaluator can actually verify with tools (`npm test`, `grep`, `git status`). For objectives whose completion depends on observable state, a tool-using evaluator catches misleading "successfully ran tests" transcript lines that the test output contradicts.
+- **Auth:** session credentials — OAuth (most users) or API key, whatever is already configured. Zero setup for the plugin user.
+- **Cost:** the model call only (~few hundred tokens of evaluator input + a one-line output). Negligible vs main-turn spend, same as Anthropic explicitly states for their evaluator.
+- **Model choice:** controlled by Claude Code's `ANTHROPIC_DEFAULT_HAIKU_MODEL` env var or the hook's optional `model: <alias>` field. Defaults to a fast model (Haiku family); users can override to any model alias including Opus.
+- **Limitation:** transcript-only judgment, no tool use. Same as Anthropic's `/goal`.
 
-**Cost:** full subagent context boot per turn (CLAUDE.md + system prompt + evaluator instructions, ~tens of thousands of tokens). More expensive than Haiku-API but inside the same authenticated session — no key management.
+### Transport B: agent hook / subagent dispatch — for tool-using verification
 
-**Auth:** zero. Uses the user's existing CC session, whatever provider it's on (Anthropic API, Bedrock, Vertex).
+When the objective's completion depends on observable state that a transcript can lie about (e.g., "tests pass" but the transcript only contains an optimistic "successfully ran tests" line), use a subagent evaluator instead. Defined via an `agent` hook in `hooks/hooks.json`, the subagent gets:
+- Fresh context window, no inherited conversation
+- File access — can actually run `npm test`, grep, verify state
+- Returns the same yes/no + reason
 
-### Transport B: external small-fast-model API
+**Strictly stronger than Transport A** for state-dependent objectives — the subagent verifies rather than infers. But pricier per turn (full subagent context boot ~tens of thousands of tokens vs the prompt hook's few hundred).
 
-For users who want lower per-turn cost and don't need tool-using verification, a Haiku/GPT-4o-mini/local-LLM call works the same way as Anthropic's native `/goal` design — fresh context, transcript-only judgment, very cheap per turn.
+- **Auth:** session credentials — same as Transport A.
+- **Cost:** subagent boot per turn. Higher than prompt hook, much lower than running the main agent again.
+- **Opt-in flag:** `--evaluator subagent` on `/goal-start`.
 
-- New MCP tool: `evaluate_completion(session_id, objective, recent_transcript)` returning `{ done: bool, reason: string }`.
-- Configuration: `evaluator.provider` setting in `.claude-plugin/plugin.json` or per-goal flag `--evaluator <name>`. Providers: `anthropic-haiku`, `anthropic-opus`, `anthropic-sonnet`, `openai-mini`, `local-ollama`, `none`.
-- Requires the provider's API key in env.
+### Transport C: external small-fast-model API — for explicit provider control
+
+For users who want a specific provider distinct from their CC session (e.g., they're on Bedrock for the main session but want to route the evaluator to Anthropic API direct), or want to use OpenAI/local models as the evaluator.
+
+- New MCP tool: `evaluate_completion(session_id, objective, recent_transcript)` returning `{ done: bool, reason: string }`. Implementation calls the configured provider.
+- Configuration: `evaluator.provider` in `.claude-plugin/plugin.json` or `--evaluator <name>` flag. Providers: `anthropic-haiku`, `openai-mini`, `local-ollama`.
+- **Auth:** requires the corresponding API key in env. Only path that needs key management.
+- **Use case:** narrow — users who specifically want a different provider from their session.
 
 ### Shared design (both transports)
 
