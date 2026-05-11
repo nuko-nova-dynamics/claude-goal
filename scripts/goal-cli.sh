@@ -185,7 +185,48 @@ case "$SUBCMD" in
     fi
     ;;
   doctor)
-    echo "claude-goal doctor: TODO (Phase 6)"
+    CHECKS='[]'
+    add_check() {
+      local id="$1" status="$2" detail="${3:-}"
+      CHECKS=$(echo "$CHECKS" | jq --arg id "$id" --arg s "$status" --arg d "$detail" \
+        '. + [{id:$id, status:$s, detail:$d}]')
+    }
+    # Plugin data dir writability
+    DATA_DIR="${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/claude-goal}}"
+    if [[ -w "$DATA_DIR" ]]; then add_check plugin_data_writable pass "$DATA_DIR"; else add_check plugin_data_writable fail "$DATA_DIR not writable"; fi
+    # Schema version
+    SV=$(sqlite3 "$DB_PATH" "SELECT version FROM schema_version;" 2>/dev/null || echo "")
+    if [[ "$SV" = "1" ]]; then add_check schema_version pass "1"; else add_check schema_version fail "got '$SV'"; fi
+    # Dependencies
+    for dep in node jq sqlite3 envsubst; do
+      if command -v "$dep" >/dev/null 2>&1; then add_check "${dep}_present" pass; else add_check "${dep}_present" fail "$dep not found in PATH"; fi
+    done
+    # Hook scripts executable
+    HOOK_OK=1
+    for h in stop post-tool-batch session-start user-prompt-expansion; do
+      [[ -x "$SCRIPT_DIR/$h.sh" ]] || HOOK_OK=0
+    done
+    if [[ $HOOK_OK -eq 1 ]]; then add_check hook_scripts_executable pass; else add_check hook_scripts_executable fail "one or more hook scripts missing or not executable"; fi
+    # Stale leases (informational)
+    NOW_MS=$(python3 -c "import time; print(int(time.time()*1000))" 2>/dev/null || echo 0)
+    STALE=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM continuation_leases WHERE expires_at_ms < ${NOW_MS};" 2>/dev/null || echo 0)
+    add_check stale_leases pass "$STALE stale"
+    # Active goals (informational)
+    ACTIVE=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goals WHERE status IN ('active','budget_limited');" 2>/dev/null || echo 0)
+    add_check active_goals pass "$ACTIVE active"
+
+    OVERALL=$(echo "$CHECKS" | jq -r 'if (map(select(.status=="fail")) | length) > 0 then "fail" elif (map(select(.status=="warn")) | length) > 0 then "warn" else "pass" end')
+
+    PLATFORM="${OSTYPE:-$(uname)}"
+    if [[ "$FORMAT" = "json" ]]; then
+      jq -n --arg v "0.1.0" --arg p "$PLATFORM" --argjson c "$CHECKS" --arg o "$OVERALL" \
+        '{version:$v, platform:$p, checks:$c, overall:$o}'
+    else
+      echo "claude-goal doctor: $OVERALL"
+      echo "Platform: $PLATFORM"
+      echo "$CHECKS" | jq -r '.[] | "  [\(.status)] \(.id)\(if .detail != "" then ": \(.detail)" else "" end)"'
+    fi
+    [[ "$OVERALL" = "fail" ]] && exit 4 || exit 0
     ;;
   *)
     echo "unknown subcommand: $SUBCMD" >&2
