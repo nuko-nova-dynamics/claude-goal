@@ -66,6 +66,22 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   [[ "$output" == *"claude-goal doctor"* ]]
 }
 
+@test "goal-cli reads .runtime-session-id marker when CLAUDE_SESSION_ID is unset" {
+  # Setup: no env var, but a marker file pointing to a real DB
+  ALT_DIR=$(mktemp -d)
+  export CLAUDE_PLUGIN_ROOT="$ALT_DIR"
+  printf '%s' "marker-session-id" > "$ALT_DIR/.runtime-session-id"
+
+  # Pre-seed the goal db with a row keyed by 'marker-session-id'
+  NOW=$(ms_now)
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES ('marker-session-id', 'g1', 'x', 'active', $NOW, $NOW);"
+
+  run env -u CLAUDE_SESSION_ID "$CLI" status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"marker-session-id"* ]] || [[ "$output" == *"Goal: x"* ]]
+  rm -rf "$ALT_DIR"
+}
+
 @test "status resolves DB from marker file when CLAUDE_PLUGIN_DATA is unset" {
   # Create an alternate data dir with its own DB
   ALT_DATA=$(mktemp -d)

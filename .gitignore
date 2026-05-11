@@ -9,3 +9,4 @@ dist/
 .env.local
 tests/fixtures/transcripts/captured/
 .runtime-data-dir
+.runtime-session-id

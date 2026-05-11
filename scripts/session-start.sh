@@ -13,5 +13,13 @@ fi
 
 INPUT=$(cat 2>/dev/null || echo "")
 SOURCE=$(echo "$INPUT" | jq -r '.source // "unknown"' 2>/dev/null || echo unknown)
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""' 2>/dev/null || true)
+
+# Write session_id marker so Bash tool subprocesses (which don't inherit
+# CLAUDE_SESSION_ID) can resolve it via goal-cli.sh's marker-file fallback.
+if [[ -n "${SESSION_ID:-}" && -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  printf '%s' "$SESSION_ID" > "${CLAUDE_PLUGIN_ROOT}/.runtime-session-id" 2>/dev/null || true
+fi
+
 log_info "session-start.sh fired (source=$SOURCE)"
 exit 0

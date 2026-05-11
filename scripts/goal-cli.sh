@@ -44,6 +44,11 @@ while (( $# > 0 )); do
   esac
 done
 
+# Resolver order: --session-id flag → CLAUDE_SESSION_ID env → marker file → error
+if [[ -z "$SESSION_ID" && -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "${CLAUDE_PLUGIN_ROOT}/.runtime-session-id" ]]; then
+  SESSION_ID=$(cat "${CLAUDE_PLUGIN_ROOT}/.runtime-session-id")
+fi
+
 # doctor doesn't need session_id; check per-subcommand
 case "$SUBCMD" in
   doctor) ;;
