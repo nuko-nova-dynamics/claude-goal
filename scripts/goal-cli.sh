@@ -6,6 +6,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/log.sh"
+source "$SCRIPT_DIR/lib/sqlite-retry.sh"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 if [[ -z "$PLUGIN_ROOT" ]]; then
   PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -66,8 +67,6 @@ case "$SUBCMD" in
     ;;
 esac
 
-# SQL escape for safe interpolation (Phase 3 will move to lib/sqlite-retry.sh)
-sql_escape() { printf '%s' "$1" | sed "s/'/''/g"; }
 SESSION_ID_ESC=$(sql_escape "${SESSION_ID:-}")
 
 sql() { sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "$@"; }
