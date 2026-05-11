@@ -8,14 +8,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/log.sh"
 
 # DB_PATH may be pre-set by tests; otherwise resolve plugin data dir via:
-#   1. CLAUDE_PLUGIN_DATA env (set by CC for hooks; NOT set for Bash tool subprocesses)
-#   2. Runtime marker written by session-start.sh on session boot
+#   1. Runtime marker written by session-start.sh on session boot
+#   2. CLAUDE_PLUGIN_DATA env (fallback; can leak across plugin contexts)
 #   3. Hardcoded fallback (last resort; likely wrong, but better than crashing)
 if [[ -z "${DB_PATH:-}" ]]; then
-  if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
-    PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
-  elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir" ]]; then
+  if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir" ]]; then
     PLUGIN_DATA=$(cat "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir")
+  elif [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
+    PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
   else
     PLUGIN_DATA="$HOME/.claude/plugins/data/claude-goal"
   fi

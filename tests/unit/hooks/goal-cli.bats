@@ -107,3 +107,31 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
 
   rm -rf "$ALT_DATA" "$FAKE_ROOT"
 }
+
+@test "status resolves DB from marker file when CLAUDE_PLUGIN_DATA points elsewhere" {
+  RIGHT_DATA=$(mktemp -d)
+  RIGHT_DB="$RIGHT_DATA/goals.db"
+  sqlite3 "$RIGHT_DB" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+
+  WRONG_DATA=$(mktemp -d)
+  WRONG_DB="$WRONG_DATA/goals.db"
+  sqlite3 "$WRONG_DB" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+
+  FAKE_ROOT=$(mktemp -d)
+  printf '%s' "$RIGHT_DATA" > "$FAKE_ROOT/.runtime-data-dir"
+
+  NOW=$(python3 -c "import time; print(int(time.time()*1000))")
+  sqlite3 "$RIGHT_DB" "INSERT INTO goals (session_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES ('test-session', 'g-marker', 'marker-wins-test', 'active', $NOW, $NOW);"
+  sqlite3 "$WRONG_DB" "INSERT INTO goals (session_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES ('test-session', 'g-env', 'env-loses-test', 'active', $NOW, $NOW);"
+
+  run env -u DB_PATH \
+      CLAUDE_PLUGIN_DATA="$WRONG_DATA" \
+      CLAUDE_PLUGIN_ROOT="$FAKE_ROOT" \
+      CLAUDE_SESSION_ID="test-session" \
+      "$CLI" status --format=json
+  [ "$status" -eq 0 ]
+  OBJ=$(echo "$output" | jq -r '.objective // ""')
+  [ "$OBJ" = "marker-wins-test" ]
+
+  rm -rf "$RIGHT_DATA" "$WRONG_DATA" "$FAKE_ROOT"
+}
