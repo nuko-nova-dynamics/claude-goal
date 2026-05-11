@@ -28,6 +28,33 @@ describe("create_goal tool", () => {
     const out = handleCreateGoal(repo, { session_id: "s1", objective: "second", token_budget: null });
     expect(out.error).toMatch(/already exists/);
   });
+
+  it("rejects empty objective", () => {
+    const repo = freshRepo();
+    const out = handleCreateGoal(repo, { session_id: "s1", objective: "", token_budget: null });
+    expect(out.error).toMatch(/objective is required/);
+  });
+
+  it("rejects whitespace-only objective", () => {
+    const repo = freshRepo();
+    const out = handleCreateGoal(repo, { session_id: "s1", objective: "   ", token_budget: null });
+    expect(out.error).toMatch(/objective is required/);
+  });
+
+  it("rejects objective over 4000 characters", () => {
+    const repo = freshRepo();
+    const tooLong = "x".repeat(4001);
+    const out = handleCreateGoal(repo, { session_id: "s1", objective: tooLong, token_budget: null });
+    expect(out.error).toMatch(/4000 characters/);
+    expect(out.error).toMatch(/got 4001/);
+  });
+
+  it("accepts objective at the 4000-character boundary", () => {
+    const repo = freshRepo();
+    const exactly = "x".repeat(4000);
+    const out = handleCreateGoal(repo, { session_id: "s1", objective: exactly, token_budget: null });
+    expect(out.goal!.status).toBe("active");
+  });
 });
 
 describe("get_goal tool", () => {

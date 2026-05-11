@@ -66,7 +66,7 @@ Claude pauses automatically when `tokens_used` reaches the budget, leaving the g
 | `/goal-status` | Show current goal, status, tokens used vs budget, continuations remaining, and any warnings. |
 | `/goal-pause` | Pause the goal immediately (user-paused). Claude stops self-driving until you resume. |
 | `/goal-resume` | Resume a user-paused goal. |
-| `/goal-abandon` | Abandon the current goal permanently. |
+| `/goal-abandon` (alias `/goal-stop`) | Abandon the current goal permanently and stop the auto-continuation loop. |
 | `/goal-extend --add-continuations N` | Add N continuation turns to a `continuation_cap`-paused goal and resume it. |
 | `/goal-extend --add-hours N` | Add N hours to a `wall_clock_cap`-paused goal and resume it. |
 | `/goal-reconcile --accept-reset` | Clear the `accounting_uncertain` flag set after `/compact`. Resets token accounting to current transcript cursor and resumes if the goal was paused for that reason. |

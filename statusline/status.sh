@@ -45,24 +45,24 @@ format_tokens() {
 case "$STATUS" in
   active)
     if [[ -n "$TB" && "$TB" != "null" ]]; then
-      echo "Pursuing goal ($(format_tokens $TU) / $(format_tokens $TB))"
+      echo "◎ goal active ($(format_tokens $TU) / $(format_tokens $TB))"
     else
-      echo "Pursuing goal ($(format_tokens $TU))"
+      echo "◎ goal active ($(format_tokens $TU))"
     fi
     ;;
-  budget_limited) echo "Goal unmet (budget exhausted)" ;;
+  budget_limited) echo "◎ goal unmet (budget exhausted)" ;;
   paused)
     case "$REASON" in
-      user) echo "Goal paused (user)" ;;
-      continuation_cap) echo "Goal paused (continuation cap)" ;;
-      wall_clock_cap) echo "Goal paused (wall-clock cap)" ;;
-      cleared) echo "Goal paused (cleared)" ;;
-      degraded) echo "Goal degraded" ;;
-      accounting_error) echo "Goal paused (accounting error)" ;;
-      *) echo "Goal paused" ;;
+      user) echo "◎ goal paused (user)" ;;
+      continuation_cap) echo "◎ goal paused (continuation cap)" ;;
+      wall_clock_cap) echo "◎ goal paused (wall-clock cap)" ;;
+      cleared) echo "◎ goal paused (cleared)" ;;
+      degraded) echo "◎ goal degraded" ;;
+      accounting_error) echo "◎ goal paused (accounting error)" ;;
+      *) echo "◎ goal paused" ;;
     esac
     ;;
-  complete) echo "Goal achieved" ;;
-  abandoned) echo "Goal abandoned" ;;
+  complete) echo "◎ goal achieved" ;;
+  abandoned) echo "◎ goal abandoned" ;;
   *) ;; # unknown status — print nothing
 esac

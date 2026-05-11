@@ -6,26 +6,27 @@ v0.1.0 is the **production-grade goal-management** layer that complements Claude
 
 ## v0.2 — headline features
 
-### 1. Haiku evaluator (the big one)
+### 1. Pluggable evaluator boundary (the big one)
 
 **Status:** designed, not implemented
-**Inspired by:** Claude Code's native `/goal` mechanism — a separate small/fast model judges the completion condition each turn instead of the working model self-auditing.
+**Inspired by:** Claude Code's native `/goal` mechanism, with a Codex-flagged architectural correction.
 
-**Why:** A model that has just spent N turns working toward an objective is the *worst* judge of whether it's done — confirmation bias, sunk-cost, "almost there"-ism. Anthropic's design routes completion judgment to a fresh-context Haiku evaluator, which gets the objective + recent transcript and returns yes/no + a short reason. That's strictly better than our current `update_goal` self-audit pattern.
+**The real insight** (per Codex, the original `/goal` implementer in `codex-rs`): the win isn't the Haiku model specifically — it's **separating the completion condition from the worker's self-narrative**. A model that has spent N turns working toward an objective has sunk-cost bias to declare done. ANY separate evaluator without that context bias — Haiku, GPT-4o-mini, a local model, or even another instance of the same Claude — beats same-model self-audit. So the v0.2 design is a **pluggable evaluator boundary**, not a Haiku integration.
 
 **What changes:**
 
-- New MCP tool: `evaluate_completion(session_id, objective, recent_transcript)` returning `{ done: bool, reason: string }`.
-- Stop hook calls `evaluate_completion` after accounting catchup, before deciding to inject a continuation. If `done`, transition to `complete` and stay silent. Else inject continuation with the evaluator's reason appended as guidance.
-- Backwards-compatible: keep the `update_goal status=complete` path so the working model can still self-signal completion. The evaluator is a parallel path that decides done EITHER WAY.
-- Configuration: `--evaluator haiku|self|both` flag on `/goal-start`. Default `both`: either the model self-signals OR the evaluator says done.
+- New MCP tool: `evaluate_completion(session_id, objective, recent_transcript)` returning `{ done: bool, reason: string }`. Implementation calls whatever evaluator the user configured.
+- Configuration: `evaluator.provider` setting in `.claude-plugin/plugin.json` or per-goal flag `--evaluator <name>`. Built-in providers: `anthropic-haiku` (requires `ANTHROPIC_API_KEY`), `openai-mini` (requires `OPENAI_API_KEY`), `local-ollama` (HTTP), `none` (skip eval, model self-audit only — current behavior, default for v0.2).
+- Stop hook calls `evaluate_completion` after accounting catchup, before injecting a continuation. If `done`, transition to `complete`. Else inject continuation with the evaluator's reason appended as guidance.
+- Backwards-compatible: `update_goal status=complete` self-audit path still works. The evaluator is parallel.
+- **Distinct event types when evaluator wins vs self-signal wins** (per Codex's warning): `goal_completed_by_evaluator` carries the evaluator's reason in payload_json; `goal_completed_by_self_update` is the existing path. Audit-trail-distinguishable.
+- **`--evaluator both` mode safety:** when both paths are active, evaluator-driven completion requires reason text PLUS the audit event before transitioning. Prevents "either side prematurely stops without trace".
 
-**Cost:** one Haiku call per turn (~few hundred tokens of evaluator input + a one-line yes/no output). Negligible against the main-turn cost. Anthropic explicitly notes the same: *"Evaluation tokens are billed on the small fast model configured for your provider and are typically negligible compared to main-turn spend."*
+**Evaluator must be conservative** (Codex's warning from `codex-rs` experience): the failure mode is "declares done because progress *sounds* complete" — e.g., the transcript contains "successfully ran tests" but some failed. The evaluator prompt template biases toward "not done" — requires explicit evidence in the transcript, not optimistic language.
 
-**Open questions:**
+**Prerequisite: F5 must land first.** If the evaluator can trigger completion, every evaluator-driven win currently skips the final-turn accounting pass (same root cause as F5). F5 fix gates v0.2 evaluator rollout.
 
-- How does the plugin authenticate to the Anthropic API for the Haiku call? CC has the user's session credentials but doesn't expose them to plugins. Options: (a) require `ANTHROPIC_API_KEY` env var, (b) use the MCP server's stdio relationship to Claude Code to delegate (probably impossible without CC support), (c) make the evaluator pluggable so users can point at any LLM.
-- Reason-text accumulation: if the evaluator says "no" 50 times, do we surface the reason chain in `/goal-status` for visibility? Probably yes.
+**Cost:** one evaluator call per turn (~few hundred tokens input + one-line output). Negligible against main-turn cost. With `provider: none` (default), zero added cost.
 
 ### 2. `-p` and Remote Control mode support
 

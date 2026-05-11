@@ -264,6 +264,23 @@ case "$SUBCMD" in
     # Active goals (informational)
     ACTIVE=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goals WHERE status IN ('active','budget_limited');" 2>/dev/null || echo 0)
     add_check active_goals pass "$ACTIVE active"
+    # disableAllHooks: hard fail — without hooks, the entire continuation loop is dead.
+    # Check user and project settings; managed-policy settings (system-wide) are skipped
+    # because they're outside reliable read perms across platforms.
+    HOOKS_DISABLED=""
+    for f in "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json" \
+             "$PWD/.claude/settings.json" "$PWD/.claude/settings.local.json"; do
+      [[ -r "$f" ]] || continue
+      if jq -e '.disableAllHooks == true' "$f" >/dev/null 2>&1; then
+        HOOKS_DISABLED="$f"
+        break
+      fi
+    done
+    if [[ -n "$HOOKS_DISABLED" ]]; then
+      add_check hooks_enabled fail "disableAllHooks=true in $HOOKS_DISABLED — claude-goal cannot run; remove the setting or unset to enable the goal loop"
+    else
+      add_check hooks_enabled pass ""
+    fi
 
     OVERALL=$(echo "$CHECKS" | jq -r 'if (map(select(.status=="fail")) | length) > 0 then "fail" elif (map(select(.status=="warn")) | length) > 0 then "warn" else "pass" end')
 

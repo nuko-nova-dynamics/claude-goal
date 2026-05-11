@@ -52,3 +52,23 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   OVERALL=$(echo "$output" | jq -r '.overall')
   [ "$OVERALL" = "fail" ]
 }
+
+@test "doctor reports hooks_enabled pass when no settings disable hooks" {
+  # No settings files exist in $HOME or $PWD pointing at our isolated tmp
+  HOME="$TMPDIR_TEST/home" PWD="$TMPDIR_TEST/work" run "$CLI" doctor --format=json
+  [ "$status" -eq 0 ] || [ "$status" -eq 4 ]
+  HOOKS=$(echo "$output" | jq -r '.checks[] | select(.id=="hooks_enabled") | .status')
+  [ "$HOOKS" = "pass" ]
+}
+
+@test "doctor reports hooks_enabled fail when disableAllHooks=true in user settings" {
+  FAKE_HOME="$TMPDIR_TEST/home-disabled"
+  mkdir -p "$FAKE_HOME/.claude"
+  echo '{"disableAllHooks": true}' > "$FAKE_HOME/.claude/settings.json"
+  HOME="$FAKE_HOME" run "$CLI" doctor --format=json
+  [ "$status" -eq 4 ]
+  HOOKS=$(echo "$output" | jq -r '.checks[] | select(.id=="hooks_enabled") | .status')
+  [ "$HOOKS" = "fail" ]
+  DETAIL=$(echo "$output" | jq -r '.checks[] | select(.id=="hooks_enabled") | .detail')
+  [[ "$DETAIL" == *"disableAllHooks=true"* ]]
+}
