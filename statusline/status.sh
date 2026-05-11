@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# claude-goal statusline. Reads the active session's goal and prints a short status string.
+# Designed to be called from ~/.claude/settings.json statusLine config.
+# Exits 0 with empty output if no goal exists.
+set -uo pipefail
+
+# DB path resolution: marker file > env > fallback. Match Phase 4.6 inverted resolver.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+if [[ -f "$PLUGIN_ROOT/.runtime-data-dir" ]]; then
+  PLUGIN_DATA=$(cat "$PLUGIN_ROOT/.runtime-data-dir")
+elif [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
+  PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
+else
+  PLUGIN_DATA="$HOME/.claude/plugins/data/claude-goal"
+fi
+DB_PATH="$PLUGIN_DATA/goals.db"
+
+SID="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
+# Fallback: read from marker file if env vars absent
+if [[ -z "$SID" && -f "$PLUGIN_ROOT/.runtime-session-id" ]]; then
+  SID=$(cat "$PLUGIN_ROOT/.runtime-session-id")
+fi
+
+[[ -z "$SID" || ! -f "$DB_PATH" ]] && exit 0
+
+# Use sqlite3 -json output and jq for robust parsing per Phase 4.6 lesson
+ROW=$(sqlite3 -bail -cmd ".timeout 5000" -json "$DB_PATH" \
+  "SELECT status, paused_reason, tokens_used, token_budget, continuations_remaining FROM goals WHERE session_id = '$SID';" 2>/dev/null || echo "")
+[[ -z "$ROW" || "$ROW" == "[]" ]] && exit 0
+
+STATUS=$(echo "$ROW" | jq -r '.[0].status')
+REASON=$(echo "$ROW" | jq -r '.[0].paused_reason // ""')
+TU=$(echo "$ROW" | jq -r '.[0].tokens_used // 0')
+TB=$(echo "$ROW" | jq -r '.[0].token_budget // ""')
+
+# Format tokens with K suffix when >= 1000
+format_tokens() {
+  local n=$1
+  if (( n >= 1000 )); then echo "$((n / 1000))K"
+  else echo "$n"
+  fi
+}
+
+case "$STATUS" in
+  active)
+    if [[ -n "$TB" && "$TB" != "null" ]]; then
+      echo "Pursuing goal ($(format_tokens $TU) / $(format_tokens $TB))"
+    else
+      echo "Pursuing goal ($(format_tokens $TU))"
+    fi
+    ;;
+  budget_limited) echo "Goal unmet (budget exhausted)" ;;
+  paused)
+    case "$REASON" in
+      user) echo "Goal paused (user)" ;;
+      continuation_cap) echo "Goal paused (continuation cap)" ;;
+      wall_clock_cap) echo "Goal paused (wall-clock cap)" ;;
+      cleared) echo "Goal paused (cleared)" ;;
+      degraded) echo "Goal degraded" ;;
+      accounting_error) echo "Goal paused (accounting error)" ;;
+      *) echo "Goal paused" ;;
+    esac
+    ;;
+  complete) echo "Goal achieved" ;;
+  abandoned) echo "Goal abandoned" ;;
+  *) ;; # unknown status — print nothing
+esac
