@@ -4,7 +4,8 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run copy-migrations",
+    "copy-migrations": "mkdir -p dist/migrations && cp src/migrations/*.sql dist/migrations/",
     "dev": "tsc --watch",
     "test": "vitest run"
   },
