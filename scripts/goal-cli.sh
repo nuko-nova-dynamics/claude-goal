@@ -33,6 +33,8 @@ FORMAT="text"
 ADD_CONT=""
 ADD_HOURS=""
 ACCEPT_RESET=0
+CLEANUP_ACTION=""
+CLEANUP_HOURS=24
 
 SUBCMD="${1:-}"; shift || true
 
@@ -47,6 +49,10 @@ while (( $# > 0 )); do
     --add-hours=*) ADD_HOURS="${1#*=}"; shift ;;
     --add-hours) ADD_HOURS="$2"; shift 2 ;;
     --accept-reset) ACCEPT_RESET=1; shift ;;
+    --list) CLEANUP_ACTION="list"; shift ;;
+    --delete) CLEANUP_ACTION="delete"; shift ;;
+    --older-than) CLEANUP_HOURS="$2"; shift 2 ;;
+    --older-than=*) CLEANUP_HOURS="${1#*=}"; shift ;;
     *) shift ;;
   esac
 done
@@ -56,9 +62,9 @@ if [[ -z "$SESSION_ID" && -n "$PLUGIN_ROOT" && -f "$PLUGIN_ROOT/.runtime-session
   SESSION_ID=$(cat "$PLUGIN_ROOT/.runtime-session-id")
 fi
 
-# doctor doesn't need session_id; check per-subcommand
+# doctor and cleanup don't need session_id; check per-subcommand
 case "$SUBCMD" in
-  doctor) ;;
+  doctor|cleanup) ;;
   *)
     if [[ -z "$SESSION_ID" ]]; then
       echo "error: session id not available; pass --session-id" >&2
@@ -182,6 +188,40 @@ case "$SUBCMD" in
     else
       echo "use --accept-reset to clear accounting_uncertain flag" >&2
       exit 1
+    fi
+    ;;
+  cleanup)
+    if [[ -z "$CLEANUP_ACTION" ]]; then
+      echo "error: cleanup requires --list or --delete; optional --older-than HOURS (default 24)" >&2
+      exit 1
+    fi
+    # Use ms_now if available, else inline
+    if type -t ms_now >/dev/null; then NOW=$(ms_now)
+    elif date +%s%3N 2>/dev/null | grep -q '^[0-9]\+$'; then NOW=$(date +%s%3N)
+    else NOW=$(python3 -c "import time; print(int(time.time()*1000))")
+    fi
+    CUTOFF=$(( NOW - (CLEANUP_HOURS * 3600 * 1000) ))
+    if [[ "$CLEANUP_ACTION" = "list" ]]; then
+      ROWS=$(sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" \
+        "SELECT session_id, goal_id, objective, status,
+                (($NOW - updated_at_ms)/3600000) AS hours_stale
+         FROM goals WHERE updated_at_ms < $CUTOFF ORDER BY updated_at_ms;" 2>/dev/null || echo "")
+      if [[ -z "$ROWS" ]]; then
+        echo "no orphan goals older than ${CLEANUP_HOURS}h"
+      else
+        echo "$ROWS"
+      fi
+    else
+      # delete
+      DELETED=$(sqlite3 -bail "$DB_PATH" "SELECT COUNT(*) FROM goals WHERE updated_at_ms < $CUTOFF;" 2>/dev/null || echo "0")
+      sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
+        BEGIN IMMEDIATE;
+        DELETE FROM goal_events WHERE session_id IN (SELECT session_id FROM goals WHERE updated_at_ms < $CUTOFF);
+        DELETE FROM continuation_leases WHERE session_id IN (SELECT session_id FROM goals WHERE updated_at_ms < $CUTOFF);
+        DELETE FROM goals WHERE updated_at_ms < $CUTOFF;
+        COMMIT;
+      " >/dev/null 2>&1
+      echo "deleted $DELETED orphan goal(s) older than ${CLEANUP_HOURS}h"
     fi
     ;;
   doctor)
