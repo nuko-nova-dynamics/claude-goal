@@ -31,18 +31,31 @@ STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/nul
 [[ -z "$SESSION_ID" ]] && exit 0
 SESSION_ID_ESC=$(sql_escape "$SESSION_ID")
 
-# Recursion guard: explicit field (primary, per probe P18)
+latest_assistant_uuid() {
+  local transcript="$1"
+  [[ ! -r "$transcript" ]] && return 0
+  grep '"type":"assistant"' "$transcript" 2>/dev/null | tail -1 | jq -r '.uuid // ""' 2>/dev/null || true
+}
+
+# Recursion guard: stop_hook_active=true is present on normal block-driven
+# continuation turns too. Treat it as recursive only when Claude re-enters Stop
+# without a newer assistant message since our last accounting cursor.
 if [[ "$STOP_HOOK_ACTIVE" == "true" ]]; then
-  log_info "stop: stop_hook_active=true; recursion guard exit"
-  exit 0
+  LATEST_ASSISTANT_UUID=$(latest_assistant_uuid "$TRANSCRIPT")
+  LAST_ACCOUNTED_UUID=$(sql_retry "SELECT COALESCE(last_accounted_uuid, '') FROM goals WHERE session_id = '$SESSION_ID_ESC';" 2>/dev/null || echo "")
+  if [[ -z "$LATEST_ASSISTANT_UUID" || "$LATEST_ASSISTANT_UUID" == "$LAST_ACCOUNTED_UUID" ]]; then
+    log_info "stop: stop_hook_active=true with no new assistant turn; recursion guard exit"
+    exit 0
+  fi
+  log_info "stop: stop_hook_active=true but transcript advanced; continuing"
 fi
 
 # ms_now cross-platform
 NOW=$(ms_now)
 
-# Recursion guard: timing fallback (covers case where stop_hook_active is absent)
+# Recursion guard: timing fallback for runtimes where stop_hook_active is absent.
 LAST_CONT=$(sql_retry "SELECT COALESCE(last_continuation_at_ms, 0) FROM goals WHERE session_id = '$SESSION_ID_ESC';" 2>/dev/null || echo "")
-if [[ -n "$LAST_CONT" ]] && (( NOW - LAST_CONT < 500 )); then
+if [[ "$STOP_HOOK_ACTIVE" != "true" && -n "$LAST_CONT" ]] && (( NOW - LAST_CONT < 500 )); then
   log_info "stop: timing-fallback recursion guard tripped"
   exit 0
 fi

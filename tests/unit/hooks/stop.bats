@@ -53,11 +53,30 @@ teardown() {
   [ -z "$output" ]
 }
 
-@test "stop hook recursion-guard short-circuits on stop_hook_active=true" {
+@test "stop hook recursion-guard short-circuits when stop_hook_active=true and no new assistant turn" {
+  cat > "$TRANSCRIPT" <<'EOF'
+{"type":"assistant","uuid":"u1","message":{"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"output_tokens":1},"content":[{"type":"text","text":"done for now"}]}}
+EOF
+  sqlite3 "$DB_PATH" "UPDATE goals SET last_accounted_uuid='u1' WHERE session_id='s1';"
   INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":true}"
   run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "stop hook still injects on stop_hook_active=true after continuation turn advances transcript" {
+  cat > "$TRANSCRIPT" <<'EOF'
+{"type":"assistant","uuid":"u2","message":{"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"output_tokens":1},"content":[{"type":"text","text":"continuation turn finished"}]}}
+EOF
+  sqlite3 "$DB_PATH" "UPDATE goals SET last_accounted_uuid='u1', last_continuation_at_ms=1 WHERE session_id='s1';"
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":true}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"decision":"block"'* ]]
+  REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals;")
+  [ "$REM" = "49" ]
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='continuation_injected';")
+  [ "$EVENTS" = "1" ]
 }
 
 @test "stop hook flips to paused on continuation_cap" {
