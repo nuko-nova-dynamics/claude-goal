@@ -13,20 +13,42 @@ v0.1.0 is the **production-grade goal-management** layer that complements Claude
 
 **The real insight** (per Codex, the original `/goal` implementer in `codex-rs`): the win isn't the Haiku model specifically — it's **separating the completion condition from the worker's self-narrative**. A model that has spent N turns working toward an objective has sunk-cost bias to declare done. ANY separate evaluator without that context bias — Haiku, GPT-4o-mini, a local model, or even another instance of the same Claude — beats same-model self-audit. So the v0.2 design is a **pluggable evaluator boundary**, not a Haiku integration.
 
-**What changes:**
+**Two transport options for the evaluator boundary** — both achieve the same architectural decoupling, with different trade-offs. v0.2 supports both, default is subagent (no auth setup needed).
 
-- New MCP tool: `evaluate_completion(session_id, objective, recent_transcript)` returning `{ done: bool, reason: string }`. Implementation calls whatever evaluator the user configured.
-- Configuration: `evaluator.provider` setting in `.claude-plugin/plugin.json` or per-goal flag `--evaluator <name>`. Built-in providers: `anthropic-haiku` (requires `ANTHROPIC_API_KEY`), `openai-mini` (requires `OPENAI_API_KEY`), `local-ollama` (HTTP), `none` (skip eval, model self-audit only — current behavior, default for v0.2).
-- Stop hook calls `evaluate_completion` after accounting catchup, before injecting a continuation. If `done`, transition to `complete`. Else inject continuation with the evaluator's reason appended as guidance.
-- Backwards-compatible: `update_goal status=complete` self-audit path still works. The evaluator is parallel.
-- **Distinct event types when evaluator wins vs self-signal wins** (per Codex's warning): `goal_completed_by_evaluator` carries the evaluator's reason in payload_json; `goal_completed_by_self_update` is the existing path. Audit-trail-distinguishable.
-- **`--evaluator both` mode safety:** when both paths are active, evaluator-driven completion requires reason text PLUS the audit event before transitioning. Prevents "either side prematurely stops without trace".
+### Transport A: subagent dispatch (default)
 
-**Evaluator must be conservative** (Codex's warning from `codex-rs` experience): the failure mode is "declares done because progress *sounds* complete" — e.g., the transcript contains "successfully ran tests" but some failed. The evaluator prompt template biases toward "not done" — requires explicit evidence in the transcript, not optimistic language.
+The Stop hook injects a continuation prompt instructing the working model to dispatch a `goal-evaluator` subagent before continuing. The subagent gets:
+- A fresh context window (no inherited conversation)
+- The objective text
+- File access (so it can actually run tests, grep files, verify state)
+- Instructions to return yes/no + reason
 
-**Prerequisite: F5 must land first.** If the evaluator can trigger completion, every evaluator-driven win currently skips the final-turn accounting pass (same root cause as F5). F5 fix gates v0.2 evaluator rollout.
+The subagent's verdict drives the next turn: "yes" → call `update_goal complete`; "no" → keep working with the reason as guidance.
 
-**Cost:** one evaluator call per turn (~few hundred tokens input + one-line output). Negligible against main-turn cost. With `provider: none` (default), zero added cost.
+**Why this is stronger than Anthropic's design**: Anthropic's Haiku evaluator explicitly cannot call tools — it judges only from transcript text. A subagent evaluator can actually verify with tools (`npm test`, `grep`, `git status`). For objectives whose completion depends on observable state, a tool-using evaluator catches misleading "successfully ran tests" transcript lines that the test output contradicts.
+
+**Cost:** full subagent context boot per turn (CLAUDE.md + system prompt + evaluator instructions, ~tens of thousands of tokens). More expensive than Haiku-API but inside the same authenticated session — no key management.
+
+**Auth:** zero. Uses the user's existing CC session, whatever provider it's on (Anthropic API, Bedrock, Vertex).
+
+### Transport B: external small-fast-model API
+
+For users who want lower per-turn cost and don't need tool-using verification, a Haiku/GPT-4o-mini/local-LLM call works the same way as Anthropic's native `/goal` design — fresh context, transcript-only judgment, very cheap per turn.
+
+- New MCP tool: `evaluate_completion(session_id, objective, recent_transcript)` returning `{ done: bool, reason: string }`.
+- Configuration: `evaluator.provider` setting in `.claude-plugin/plugin.json` or per-goal flag `--evaluator <name>`. Providers: `anthropic-haiku`, `anthropic-opus`, `anthropic-sonnet`, `openai-mini`, `local-ollama`, `none`.
+- Requires the provider's API key in env.
+
+### Shared design (both transports)
+
+- Stop hook routes through the evaluator after accounting catchup, before continuation injection.
+- Backwards-compatible: `update_goal status=complete` self-audit path still works as a parallel signal.
+- **Distinct event types when evaluator wins vs self-signal wins**: `goal_completed_by_evaluator` carries the verdict + reason in `payload_json`; `goal_completed_by_self_update` is the existing path. Audit-distinguishable.
+- **`--evaluator both` mode safety**: evaluator-driven completion requires reason text PLUS the audit event before transitioning. Prevents either side prematurely stopping without trace.
+
+**Evaluator must be conservative** (Codex's warning from `codex-rs` experience): the failure mode is "declares done because progress *sounds* complete" — e.g., transcript contains "successfully ran tests" but some failed. Both transports' evaluator prompts bias toward "not done" — require explicit evidence (file contents, exit codes, test reports), not optimistic language. Subagent transport has the upper hand here because it can verify with tools instead of trusting the transcript.
+
+**Prerequisite: F5 must land first.** If the evaluator can trigger completion, every evaluator-driven win currently skips the final-turn accounting pass. F5 fix gates v0.2 evaluator rollout.
 
 ### 2. `-p` and Remote Control mode support
 
