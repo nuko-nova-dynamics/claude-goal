@@ -64,6 +64,19 @@ teardown() {
   [ "$EVENT_COUNT" = "0" ]
 }
 
+@test "SessionStart source=clear logs orphan policy for new clear session" {
+  echo '{"session_id":"new-clear-session","source":"clear"}' \
+    | "$REPO_ROOT/scripts/session-start.sh"
+  # New clear sessions do not have a goal row, but the hook should still leave
+  # an operator-visible breadcrumb that the orphan policy ran.
+  ROW_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goals WHERE session_id='new-clear-session';")
+  [ "$ROW_COUNT" = "0" ]
+  EVENT_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events;")
+  [ "$EVENT_COUNT" = "0" ]
+  run grep -R "source=clear .* orphan policy" "$TMPDIR_TEST/logs"
+  [ "$status" -eq 0 ]
+}
+
 # ---------------------------------------------------------------------------
 # 4. source=compact: sets accounting_uncertain=1, goal stays active
 # ---------------------------------------------------------------------------

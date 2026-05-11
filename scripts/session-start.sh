@@ -78,7 +78,12 @@ NOW=$(ms_now)
 
 # Look up the goal for this session_id.
 ROW=$(sql_retry "SELECT goal_id, status, COALESCE(resume_at_ms,0), version FROM goals WHERE session_id = '$SESSION_ID_ESC' LIMIT 1;" 2>/dev/null || echo "")
-[[ -z "$ROW" ]] && exit 0   # no goal for this session — nothing to do
+if [[ -z "$ROW" ]]; then
+  if [[ "$SOURCE" = "clear" ]]; then
+    log_info "session-start: source=clear — orphan policy; not touching DB (session_id=$SESSION_ID)"
+  fi
+  exit 0   # no goal for this session — nothing to do
+fi
 
 GOAL_ID=$(printf '%s' "$ROW" | cut -d'|' -f1)
 STATUS=$(printf '%s' "$ROW"  | cut -d'|' -f2)
