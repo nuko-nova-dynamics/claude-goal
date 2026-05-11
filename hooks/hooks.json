@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "Stop": [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/stop.sh", "timeout": 60 }] }],
+    "PostToolBatch": [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post-tool-batch.sh", "timeout": 30 }] }],
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh", "timeout": 30 }] }]
+  }
+}
