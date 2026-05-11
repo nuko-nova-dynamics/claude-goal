@@ -6,15 +6,21 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/log.sh"
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [[ -z "$PLUGIN_ROOT" ]]; then
+  PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 
-# DB_PATH may be pre-set by tests; otherwise resolve plugin data dir via:
+# Resolve plugin data dir via:
 #   1. Runtime marker written by session-start.sh on session boot
-#   2. CLAUDE_PLUGIN_DATA env (fallback; can leak across plugin contexts)
-#   3. Hardcoded fallback (last resort; likely wrong, but better than crashing)
-if [[ -z "${DB_PATH:-}" ]]; then
-  if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir" ]]; then
-    PLUGIN_DATA=$(cat "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir")
-  elif [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
+#   2. Explicit DB_PATH (test/local override when no marker exists)
+#   3. CLAUDE_PLUGIN_DATA env (fallback; can leak across plugin contexts)
+#   4. Hardcoded fallback (last resort; likely wrong, but better than crashing)
+if [[ -n "$PLUGIN_ROOT" && -f "$PLUGIN_ROOT/.runtime-data-dir" ]]; then
+  PLUGIN_DATA=$(cat "$PLUGIN_ROOT/.runtime-data-dir")
+  DB_PATH="$PLUGIN_DATA/goals.db"
+elif [[ -z "${DB_PATH:-}" ]]; then
+  if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
     PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
   else
     PLUGIN_DATA="$HOME/.claude/plugins/data/claude-goal"
@@ -45,8 +51,8 @@ while (( $# > 0 )); do
 done
 
 # Resolver order: --session-id flag → CLAUDE_SESSION_ID env → marker file → error
-if [[ -z "$SESSION_ID" && -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "${CLAUDE_PLUGIN_ROOT}/.runtime-session-id" ]]; then
-  SESSION_ID=$(cat "${CLAUDE_PLUGIN_ROOT}/.runtime-session-id")
+if [[ -z "$SESSION_ID" && -n "$PLUGIN_ROOT" && -f "$PLUGIN_ROOT/.runtime-session-id" ]]; then
+  SESSION_ID=$(cat "$PLUGIN_ROOT/.runtime-session-id")
 fi
 
 # doctor doesn't need session_id; check per-subcommand
@@ -86,16 +92,20 @@ case "$SUBCMD" in
     fi
     ;;
   pause)
-    GOAL_ID=$(sql "SELECT goal_id FROM goals WHERE session_id = '$SESSION_ID_ESC' AND status IN ('active','budget_limited');")
-    [[ -z "$GOAL_ID" ]] && { echo "no active goal to pause"; exit 2; }
+    ROW=$(sql -json "SELECT goal_id, status FROM goals WHERE session_id = '$SESSION_ID_ESC' AND status IN ('active','budget_limited');")
+    [[ -z "$ROW" || "$ROW" == "[]" ]] && { echo "no active goal to pause"; exit 2; }
+    GOAL_ID=$(echo "$ROW" | jq -r '.[0].goal_id')
+    STATUS_BEFORE=$(echo "$ROW" | jq -r '.[0].status')
+    GOAL_ID_ESC=$(sql_escape "$GOAL_ID")
+    STATUS_BEFORE_ESC=$(sql_escape "$STATUS_BEFORE")
     NOW=$(ms_now)
     sql "BEGIN IMMEDIATE;
          UPDATE goals SET status='paused', paused_reason='user',
            time_used_seconds = time_used_seconds + COALESCE((${NOW} - resume_at_ms)/1000, 0),
            resume_at_ms = NULL, version = version + 1, updated_at_ms = ${NOW}
-         WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID';
-         INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_after, pid, created_at_ms)
-         VALUES ('$SESSION_ID_ESC','$GOAL_ID','goal-cli','goal_paused','paused',$$,${NOW});
+         WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC';
+         INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, payload_json, pid, created_at_ms)
+         VALUES ('$SESSION_ID_ESC','$GOAL_ID_ESC','goal-cli','goal_paused','$STATUS_BEFORE_ESC','paused','{\"reason\":\"user\"}',$$,${NOW});
          COMMIT;"
     echo "goal paused"
     ;;
@@ -108,20 +118,33 @@ case "$SUBCMD" in
       echo "goal is paused due to '$PAUSED_REASON'; use /goal-extend or /goal-reconcile" >&2
       exit 3
     fi
+    GOAL_ID_ESC=$(sql_escape "$GOAL_ID")
     NOW=$(ms_now)
-    sql "UPDATE goals SET status='active', paused_reason=NULL,
+    sql "BEGIN IMMEDIATE;
+         UPDATE goals SET status='active', paused_reason=NULL,
            resume_at_ms = ${NOW}, version = version + 1, updated_at_ms = ${NOW}
-         WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID';"
+         WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC';
+         INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, pid, created_at_ms)
+         VALUES ('$SESSION_ID_ESC','$GOAL_ID_ESC','goal-cli','goal_resumed','paused','active',$$,${NOW});
+         COMMIT;"
     echo "goal resumed"
     ;;
   abandon)
-    GOAL_ID=$(sql "SELECT goal_id FROM goals WHERE session_id = '$SESSION_ID_ESC' AND status NOT IN ('complete','abandoned');")
-    [[ -z "$GOAL_ID" ]] && { echo "no goal to abandon"; exit 2; }
+    ROW=$(sql -json "SELECT goal_id, status FROM goals WHERE session_id = '$SESSION_ID_ESC' AND status NOT IN ('complete','abandoned');")
+    [[ -z "$ROW" || "$ROW" == "[]" ]] && { echo "no goal to abandon"; exit 2; }
+    GOAL_ID=$(echo "$ROW" | jq -r '.[0].goal_id')
+    STATUS_BEFORE=$(echo "$ROW" | jq -r '.[0].status')
+    GOAL_ID_ESC=$(sql_escape "$GOAL_ID")
+    STATUS_BEFORE_ESC=$(sql_escape "$STATUS_BEFORE")
     NOW=$(ms_now)
-    sql "UPDATE goals SET status='abandoned',
+    sql "BEGIN IMMEDIATE;
+         UPDATE goals SET status='abandoned',
            time_used_seconds = time_used_seconds + COALESCE((${NOW} - resume_at_ms)/1000, 0),
            resume_at_ms = NULL, version = version + 1, updated_at_ms = ${NOW}
-         WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID';"
+         WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC';
+         INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, pid, created_at_ms)
+         VALUES ('$SESSION_ID_ESC','$GOAL_ID_ESC','goal-cli','goal_abandoned','$STATUS_BEFORE_ESC','abandoned',$$,${NOW});
+         COMMIT;"
     echo "goal abandoned"
     ;;
   extend)

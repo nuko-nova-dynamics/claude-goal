@@ -2,8 +2,10 @@
 
 setup() {
   TMPDIR_TEST=$(mktemp -d)
+  mkdir -p "$TMPDIR_TEST/plugin-root"
   export CLAUDE_PLUGIN_DATA="$TMPDIR_TEST"
   export DB_PATH="$TMPDIR_TEST/goals.db"
+  export CLAUDE_PLUGIN_ROOT="$TMPDIR_TEST/plugin-root"
   export CLAUDE_SESSION_ID="test-session"
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export REPO_ROOT
@@ -57,6 +59,29 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   AU=$(sqlite3 "$DB_PATH" "SELECT accounting_uncertain FROM goals WHERE session_id='test-session';")
   [ "$STATUS" = "active" ]
   [ "$AU" = "0" ]
+}
+
+@test "pause resume abandon write lifecycle events" {
+  NOW=$(ms_now)
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'active', $NOW, $NOW, $NOW);"
+
+  run "$CLI" pause
+  [ "$status" -eq 0 ]
+  STATUS=$(sqlite3 "$DB_PATH" "SELECT status, paused_reason FROM goals WHERE session_id='test-session';")
+  [ "$STATUS" = "paused|user" ]
+
+  run "$CLI" resume
+  [ "$status" -eq 0 ]
+  STATUS=$(sqlite3 "$DB_PATH" "SELECT status, paused_reason IS NULL FROM goals WHERE session_id='test-session';")
+  [ "$STATUS" = "active|1" ]
+
+  run "$CLI" abandon
+  [ "$status" -eq 0 ]
+  STATUS=$(sqlite3 "$DB_PATH" "SELECT status, resume_at_ms IS NULL FROM goals WHERE session_id='test-session';")
+  [ "$STATUS" = "abandoned|1" ]
+
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT group_concat(event_type || ':' || status_before || '>' || status_after, ',') FROM goal_events WHERE session_id='test-session' ORDER BY id;")
+  [ "$EVENTS" = "goal_paused:active>paused,goal_resumed:paused>active,goal_abandoned:active>abandoned" ]
 }
 
 @test "doctor runs without session_id" {
@@ -132,6 +157,58 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   [ "$status" -eq 0 ]
   OBJ=$(echo "$output" | jq -r '.objective // ""')
   [ "$OBJ" = "marker-wins-test" ]
+
+  rm -rf "$RIGHT_DATA" "$WRONG_DATA" "$FAKE_ROOT"
+}
+
+@test "status resolves DB from marker file when DB_PATH points elsewhere" {
+  RIGHT_DATA=$(mktemp -d)
+  RIGHT_DB="$RIGHT_DATA/goals.db"
+  sqlite3 "$RIGHT_DB" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+
+  WRONG_DATA=$(mktemp -d)
+  WRONG_DB="$WRONG_DATA/goals.db"
+
+  FAKE_ROOT=$(mktemp -d)
+  printf '%s' "$RIGHT_DATA" > "$FAKE_ROOT/.runtime-data-dir"
+
+  NOW=$(python3 -c "import time; print(int(time.time()*1000))")
+  sqlite3 "$RIGHT_DB" "INSERT INTO goals (session_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES ('test-session', 'g-marker', 'marker-beats-db-path', 'active', $NOW, $NOW);"
+
+  run env \
+      DB_PATH="$WRONG_DB" \
+      CLAUDE_PLUGIN_ROOT="$FAKE_ROOT" \
+      CLAUDE_SESSION_ID="test-session" \
+      "$CLI" status --format=json
+  [ "$status" -eq 0 ]
+  OBJ=$(echo "$output" | jq -r '.objective // ""')
+  [ "$OBJ" = "marker-beats-db-path" ]
+
+  rm -rf "$RIGHT_DATA" "$WRONG_DATA" "$FAKE_ROOT"
+}
+
+@test "status resolves DB from script-adjacent marker when CLAUDE_PLUGIN_ROOT is unset" {
+  RIGHT_DATA=$(mktemp -d)
+  RIGHT_DB="$RIGHT_DATA/goals.db"
+  sqlite3 "$RIGHT_DB" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+
+  WRONG_DATA=$(mktemp -d)
+  WRONG_DB="$WRONG_DATA/goals.db"
+
+  FAKE_ROOT=$(mktemp -d)
+  ln -s "$REPO_ROOT/scripts" "$FAKE_ROOT/scripts"
+  printf '%s' "$RIGHT_DATA" > "$FAKE_ROOT/.runtime-data-dir"
+
+  NOW=$(python3 -c "import time; print(int(time.time()*1000))")
+  sqlite3 "$RIGHT_DB" "INSERT INTO goals (session_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES ('test-session', 'g-marker', 'script-adjacent-marker', 'active', $NOW, $NOW);"
+
+  run env -u CLAUDE_PLUGIN_ROOT \
+      DB_PATH="$WRONG_DB" \
+      CLAUDE_SESSION_ID="test-session" \
+      "$FAKE_ROOT/scripts/goal-cli.sh" status --format=json
+  [ "$status" -eq 0 ]
+  OBJ=$(echo "$output" | jq -r '.objective // ""')
+  [ "$OBJ" = "script-adjacent-marker" ]
 
   rm -rf "$RIGHT_DATA" "$WRONG_DATA" "$FAKE_ROOT"
 }
