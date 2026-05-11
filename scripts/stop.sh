@@ -32,6 +32,7 @@ INPUT=$(cat 2>/dev/null || echo "")
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""' 2>/dev/null || echo "")
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // ""' 2>/dev/null || echo "")
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null || echo "false")
+LAST_ASSISTANT_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // ""' 2>/dev/null || echo "")
 
 [[ -z "$SESSION_ID" ]] && exit 0
 SESSION_ID_ESC=$(sql_escape "$SESSION_ID")
@@ -42,6 +43,18 @@ latest_assistant_uuid() {
   grep '"type":"assistant"' "$transcript" 2>/dev/null | tail -1 | jq -r '.uuid // ""' 2>/dev/null || true
 }
 
+assistant_message_hash() {
+  local message="$1"
+  [[ -z "$message" ]] && { printf ''; return 0; }
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$message" | shasum -a 256 | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$message" | sha256sum | awk '{print $1}'
+  else
+    printf '%s' "$message" | cksum | awk '{print $1 "-" $2}'
+  fi
+}
+
 sql_change_count() {
   local sql_output="$1"
   local changes
@@ -49,21 +62,54 @@ sql_change_count() {
   printf '%s' "$changes"
 }
 
-# Recursion guard: stop_hook_active=true is present on normal block-driven
-# continuation turns too. Treat it as recursive only when Claude re-enters Stop
-# without a newer assistant message since our last accounting cursor.
-if [[ "$STOP_HOOK_ACTIVE" == "true" ]]; then
-  LATEST_ASSISTANT_UUID=$(latest_assistant_uuid "$TRANSCRIPT")
-  LAST_ACCOUNTED_UUID=$(sql_retry "SELECT COALESCE(last_accounted_uuid, '') FROM goals WHERE session_id = '$SESSION_ID_ESC';" 2>/dev/null || echo "")
-  if [[ -z "$LATEST_ASSISTANT_UUID" || "$LATEST_ASSISTANT_UUID" == "$LAST_ACCOUNTED_UUID" ]]; then
-    log_info "stop: stop_hook_active=true with no new assistant turn; recursion guard exit"
-    exit 0
-  fi
-  log_info "stop: stop_hook_active=true but transcript advanced; continuing"
-fi
+LATEST_ASSISTANT_UUID=$(latest_assistant_uuid "$TRANSCRIPT")
+LATEST_ASSISTANT_MESSAGE_HASH=$(assistant_message_hash "$LAST_ASSISTANT_MESSAGE")
 
 # ms_now cross-platform
 NOW=$(ms_now)
+
+# Recursion guard: stop_hook_active=true is present on normal block-driven
+# continuation turns too. Treat it as recursive only when Claude re-enters Stop
+# without either a newer transcript assistant UUID or a newer hook-provided
+# assistant message since our last injected block. Claude can invoke Stop before
+# flushing the new assistant line to JSONL, so the stdin message is load-bearing.
+if [[ "$STOP_HOOK_ACTIVE" == "true" ]]; then
+  LAST_BLOCK_JSON=$(sql_retry "
+    SELECT json_object(
+      'assistant_uuid', COALESCE(json_extract(payload_json, '$.assistant_uuid'), ''),
+      'assistant_message_hash', COALESCE(json_extract(payload_json, '$.assistant_message_hash'), ''),
+      'created_at_ms', COALESCE(created_at_ms, 0)
+    )
+    FROM goal_events
+    WHERE session_id = '$SESSION_ID_ESC'
+      AND hook_name = 'stop'
+      AND decision = 'block'
+    ORDER BY created_at_ms DESC, id DESC
+    LIMIT 1;
+  " 2>/dev/null || echo "")
+  LAST_BLOCK_UUID=$(echo "${LAST_BLOCK_JSON:-{}}" | jq -r '.assistant_uuid // ""' 2>/dev/null || echo "")
+  LAST_BLOCK_MESSAGE_HASH=$(echo "${LAST_BLOCK_JSON:-{}}" | jq -r '.assistant_message_hash // ""' 2>/dev/null || echo "")
+  LAST_BLOCK_AT=$(echo "${LAST_BLOCK_JSON:-{}}" | jq -r '.created_at_ms // 0' 2>/dev/null || echo "0")
+
+  TRANSCRIPT_ADVANCED=false
+  HOOK_MESSAGE_ADVANCED=false
+  if [[ -n "$LATEST_ASSISTANT_UUID" && "$LATEST_ASSISTANT_UUID" != "$LAST_BLOCK_UUID" ]]; then
+    TRANSCRIPT_ADVANCED=true
+  fi
+  if [[ -n "$LATEST_ASSISTANT_MESSAGE_HASH" && "$LATEST_ASSISTANT_MESSAGE_HASH" != "$LAST_BLOCK_MESSAGE_HASH" ]]; then
+    HOOK_MESSAGE_ADVANCED=true
+  fi
+  ELAPSED_SINCE_BLOCK=0
+  if [[ "$LAST_BLOCK_AT" =~ ^[0-9]+$ ]] && (( LAST_BLOCK_AT > 0 )); then
+    ELAPSED_SINCE_BLOCK=$(( NOW - LAST_BLOCK_AT ))
+  fi
+
+  if [[ ("$TRANSCRIPT_ADVANCED" != "true" && "$HOOK_MESSAGE_ADVANCED" != "true") && $ELAPSED_SINCE_BLOCK -le 750 ]]; then
+    log_info "stop: stop_hook_active=true with no new assistant turn; recursion guard exit"
+    exit 0
+  fi
+  log_info "stop: stop_hook_active=true but assistant turn advanced; continuing"
+fi
 
 # Recursion guard: timing fallback for runtimes where stop_hook_active is absent.
 LAST_CONT=$(sql_retry "SELECT COALESCE(last_continuation_at_ms, 0) FROM goals WHERE session_id = '$SESSION_ID_ESC';" 2>/dev/null || echo "")
@@ -92,11 +138,6 @@ detect_update_goal() {
   ' >/dev/null 2>&1
 }
 
-if detect_update_goal "$TRANSCRIPT"; then
-  log_info "stop: update_goal detected in transcript; skipping continuation"
-  exit 0
-fi
-
 # Step C: re-read goal state after catchup (may have transitioned to budget_limited)
 ROW_JSON=$(sqlite3 -bail -json -cmd ".timeout 5000" "$DB_PATH" "
   SELECT
@@ -110,6 +151,7 @@ ROW_JSON=$(sqlite3 -bail -json -cmd ".timeout 5000" "$DB_PATH" "
     continuations_remaining,
     max_wall_clock_seconds,
     budget_limit_reported,
+    last_accounted_byte_offset,
     version
   FROM goals
   WHERE session_id = '$SESSION_ID_ESC'
@@ -136,6 +178,7 @@ RESUME_AT=$(echo "$ROW_JSON" | jq -r '.[0].resume_at_ms // 0')
 CONT_REM=$(echo "$ROW_JSON" | jq -r '.[0].continuations_remaining // 0')
 MAX_WALL=$(echo "$ROW_JSON" | jq -r '.[0].max_wall_clock_seconds // 0')
 BL_REPORTED=$(echo "$ROW_JSON" | jq -r '.[0].budget_limit_reported // 0')
+LAST_ACCOUNTED_OFFSET=$(echo "$ROW_JSON" | jq -r '.[0].last_accounted_byte_offset // 0')
 VERSION=$(echo "$ROW_JSON" | jq -r '.[0].version // 0')
 GOAL_ID_ESC=$(sql_escape "$GOAL_ID")
 
@@ -144,7 +187,10 @@ case "$STATUS" in
     exit 0
     ;;
   active)
-    # handled below
+    if detect_update_goal "$TRANSCRIPT"; then
+      log_info "stop: update_goal detected in transcript; skipping continuation"
+      exit 0
+    fi
     ;;
   budget_limited)
     if [[ "$BL_REPORTED" = "0" ]]; then
@@ -171,6 +217,18 @@ case "$STATUS" in
           AND goal_id = '$GOAL_ID_ESC'
           AND version = $VERSION
           AND budget_limit_reported = 0;
+        INSERT INTO goal_events
+          (session_id, goal_id, hook_name, event_type, status_before, status_after,
+           version_before, version_after, decision, pid, created_at_ms)
+          SELECT '$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'budget_limit_reported',
+            'budget_limited', 'budget_limited', $VERSION, $((VERSION + 1)), 'block', $$, $NOW
+          WHERE EXISTS (
+            SELECT 1 FROM goals
+            WHERE session_id = '$SESSION_ID_ESC'
+              AND goal_id = '$GOAL_ID_ESC'
+              AND version = $((VERSION + 1))
+              AND budget_limit_reported = 1
+          );
         SELECT changes();
         COMMIT;
       " 2>/dev/null || echo "0")
@@ -305,9 +363,16 @@ if ! echo "$JSON" | jq -e '.decision == "block" and (.reason | length > 0)' >/de
   exit 0
 fi
 
+CONT_PAYLOAD=$(jq -cn \
+  --arg assistant_uuid "$LATEST_ASSISTANT_UUID" \
+  --arg assistant_message_hash "$LATEST_ASSISTANT_MESSAGE_HASH" \
+  --argjson last_accounted_byte_offset "${LAST_ACCOUNTED_OFFSET:-0}" \
+  '{assistant_uuid:$assistant_uuid, assistant_message_hash:$assistant_message_hash, last_accounted_byte_offset:$last_accounted_byte_offset}')
+CONT_PAYLOAD_ESC=$(sql_escape "$CONT_PAYLOAD")
+
 # Record continuation_injected event, gated by WHERE EXISTS (version race loser won't emit)
-sql_retry "INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, decision, status_before, status_after, version_before, version_after, pid, created_at_ms)
-  SELECT '$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'continuation_injected', 'block', 'active', 'active', $VERSION, $((VERSION + 1)), $$, $NOW
+sql_retry "INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, decision, status_before, status_after, version_before, version_after, payload_json, pid, created_at_ms)
+  SELECT '$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'continuation_injected', 'block', 'active', 'active', $VERSION, $((VERSION + 1)), '$CONT_PAYLOAD_ESC', $$, $NOW
   WHERE EXISTS (
     SELECT 1 FROM goals WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC' AND version = $((VERSION + 1))
   );"

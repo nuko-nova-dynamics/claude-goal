@@ -51,4 +51,17 @@ describe("update_goal tool", () => {
     const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete" });
     expect(out.goal!.status).toBe("complete");
   });
+
+  it("does not allow budget_limited goals to be overwritten as complete", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: 1000 });
+    repo.pause("s1", repo.getBySession("s1")!.goal_id, "degraded");
+    repo.resume("s1", repo.getBySession("s1")!.goal_id);
+    repo.testHelper_setStatus("s1", "budget_limited");
+
+    const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete" });
+
+    expect(out.error).toMatch(/cannot mark complete from status 'budget_limited'/);
+    expect(repo.getBySession("s1")!.status).toBe("budget_limited");
+  });
 });

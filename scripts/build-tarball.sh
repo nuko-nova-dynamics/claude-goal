@@ -10,19 +10,32 @@ cd "$REPO_ROOT"
 
 VERSION="$(jq -r '.version' .claude-plugin/plugin.json)"
 OUT="claude-goal-v${VERSION}.tar.gz"
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
 
-# Make sure the MCP server is built so dist/ ships
+# Make sure the MCP server is built so dist/ ships.
 (cd mcp/goal-server && npm run build >/dev/null)
 
-tar --exclude='node_modules' \
+# Stage an installable plugin tree. The MCP entrypoint runs from dist/index.js
+# and depends on runtime packages resolved from mcp/goal-server/node_modules.
+# Keep those dependencies in the tarball so a clean target profile does not
+# need the source repo or a package-manager install step.
+mkdir -p "$STAGE/mcp/goal-server"
+cp -R .claude-plugin .mcp.json hooks scripts skills prompts statusline README.md docs "$STAGE/"
+cp mcp/goal-server/package.json mcp/goal-server/package-lock.json "$STAGE/mcp/goal-server/"
+cp -R mcp/goal-server/dist mcp/goal-server/node_modules "$STAGE/mcp/goal-server/"
+
+(cd "$STAGE/mcp/goal-server" && npm prune --omit=dev >/dev/null)
+
+tar \
     --exclude='.git' \
     --exclude='*.db' \
     --exclude='*.db-shm' \
     --exclude='*.db-wal' \
     --exclude='tests/fixtures/transcripts/captured' \
     -czf "$OUT" \
-    .claude-plugin .mcp.json hooks/ scripts/ skills/ prompts/ statusline/ \
-    mcp/goal-server/package.json mcp/goal-server/dist/ \
-    README.md docs/
+    -C "$STAGE" \
+    .claude-plugin .mcp.json hooks scripts skills prompts statusline \
+    mcp README.md docs
 
 echo "built $OUT ($(du -h "$OUT" | cut -f1), $(tar -tzf "$OUT" | wc -l | tr -d ' ') entries)"

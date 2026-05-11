@@ -20,7 +20,7 @@ tar -xzf claude-goal-v0.1.0.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 
-The tarball is built with `tar --exclude='node_modules' --exclude='.git'` and ships the prebuilt MCP `dist/`, so no Node toolchain is needed on the target machine beyond a Node 22 runtime to execute the server.
+The tarball ships the prebuilt MCP `dist/` plus pruned production runtime dependencies under `mcp/goal-server/node_modules`, so no package-manager install step is needed on the target machine beyond a Node 22 runtime to execute the server.
 
 **Start a goal:**
 

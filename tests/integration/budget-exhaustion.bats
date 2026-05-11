@@ -67,4 +67,8 @@ teardown() {
   reported=$(sqlite3 "$FAKE_DATA_DIR/goals.db" \
     "SELECT budget_limit_reported FROM goals WHERE session_id = '$FAKE_SESSION_ID';")
   [ "$reported" = "1" ]
+
+  event_count=$(sqlite3 "$FAKE_DATA_DIR/goals.db" \
+    "SELECT COUNT(*) FROM goal_events WHERE session_id = '$FAKE_SESSION_ID' AND event_type = 'budget_limit_reported' AND decision = 'block';")
+  [ "$event_count" = "1" ]
 }

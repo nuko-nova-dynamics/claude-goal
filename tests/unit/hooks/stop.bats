@@ -25,6 +25,10 @@ setup() {
   echo "" > "$TRANSCRIPT"
 }
 
+hash_text() {
+  printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+}
+
 teardown() {
   # Restore the marker file
   if [[ -f "$REPO_ROOT/.runtime-data-dir.bak" ]]; then
@@ -57,8 +61,11 @@ teardown() {
   cat > "$TRANSCRIPT" <<'EOF'
 {"type":"assistant","uuid":"u1","message":{"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"output_tokens":1},"content":[{"type":"text","text":"done for now"}]}}
 EOF
+  HASH=$(hash_text "done for now")
   sqlite3 "$DB_PATH" "UPDATE goals SET last_accounted_uuid='u1' WHERE session_id='s1';"
-  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":true}"
+  sqlite3 "$DB_PATH" "INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, decision, payload_json, created_at_ms)
+    VALUES ('s1', 'g1', 'stop', 'continuation_injected', 'block', '{\"assistant_uuid\":\"u1\",\"assistant_message_hash\":\"$HASH\"}', $NOW);"
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":true,\"last_assistant_message\":\"done for now\"}"
   run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -68,14 +75,36 @@ EOF
   cat > "$TRANSCRIPT" <<'EOF'
 {"type":"assistant","uuid":"u2","message":{"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"output_tokens":1},"content":[{"type":"text","text":"continuation turn finished"}]}}
 EOF
-  sqlite3 "$DB_PATH" "UPDATE goals SET last_accounted_uuid='u1', last_continuation_at_ms=1 WHERE session_id='s1';"
-  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":true}"
+  HASH=$(hash_text "previous turn")
+  sqlite3 "$DB_PATH" "UPDATE goals SET last_accounted_uuid='u2', last_continuation_at_ms=1 WHERE session_id='s1';"
+  sqlite3 "$DB_PATH" "INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, decision, payload_json, created_at_ms)
+    VALUES ('s1', 'g1', 'stop', 'continuation_injected', 'block', '{\"assistant_uuid\":\"u1\",\"assistant_message_hash\":\"$HASH\"}', $NOW);"
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":true,\"last_assistant_message\":\"continuation turn finished\"}"
   run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *'"decision":"block"'* ]]
   REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals;")
   [ "$REM" = "49" ]
-  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='continuation_injected';")
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='continuation_injected' AND json_extract(payload_json, '$.assistant_uuid')='u2';")
+  [ "$EVENTS" = "1" ]
+}
+
+@test "stop hook still injects when hook assistant message advances before transcript flush" {
+  cat > "$TRANSCRIPT" <<'EOF'
+{"type":"assistant","uuid":"u1","message":{"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"output_tokens":1},"content":[{"type":"text","text":"1"}]}}
+EOF
+  HASH=$(hash_text "1")
+  sqlite3 "$DB_PATH" "UPDATE goals SET last_accounted_uuid='u1', last_continuation_at_ms=1 WHERE session_id='s1';"
+  sqlite3 "$DB_PATH" "INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, decision, payload_json, created_at_ms)
+    VALUES ('s1', 'g1', 'stop', 'continuation_injected', 'block', '{\"assistant_uuid\":\"u1\",\"assistant_message_hash\":\"$HASH\"}', $NOW);"
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":true,\"last_assistant_message\":\"2\"}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"decision":"block"'* ]]
+  REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals;")
+  [ "$REM" = "49" ]
+  NEW_HASH=$(hash_text "2")
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='continuation_injected' AND json_extract(payload_json, '$.assistant_message_hash')='$NEW_HASH';")
   [ "$EVENTS" = "1" ]
 }
 
@@ -111,6 +140,8 @@ EOF
   [[ "$output" == *"reached its token budget"* ]]
   REPORTED=$(sqlite3 "$DB_PATH" "SELECT budget_limit_reported FROM goals;")
   [ "$REPORTED" = "1" ]
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='budget_limit_reported' AND status_before='budget_limited' AND status_after='budget_limited' AND decision='block';")
+  [ "$EVENTS" = "1" ]
 }
 
 @test "stop hook silent on second budget_limited fire" {
@@ -133,6 +164,21 @@ EOF
   [ -z "$output" ]
   REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals;")
   [ "$REM" = "50" ]
+}
+
+@test "stop hook records budget limit even when update_goal appears in transcript" {
+  sqlite3 "$DB_PATH" "UPDATE goals SET status='budget_limited', budget_limit_reported=0 WHERE session_id='s1';"
+  cat > "$TRANSCRIPT" <<'EOF'
+{"type":"assistant","uuid":"u1","message":{"content":[{"type":"tool_use","name":"mcp__plugin_claude-goal_goal__update_goal","input":{"status":"complete"}}]}}
+EOF
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":false}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"decision":"block"'* ]]
+  REPORTED=$(sqlite3 "$DB_PATH" "SELECT budget_limit_reported FROM goals;")
+  [ "$REPORTED" = "1" ]
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='budget_limit_reported';")
+  [ "$EVENTS" = "1" ]
 }
 
 @test "stop hook detects update_goal in transcript and skips injection" {

@@ -99,7 +99,7 @@ export class GoalsRepo {
       const g = this.getBySession(session_id);
       if (!g) throw new Error("no goal exists");
       if (goal_id && g.goal_id !== goal_id) throw new Error("goal_id mismatch");
-      if (g.status !== "active" && g.status !== "budget_limited") {
+      if (g.status !== "active") {
         throw new Error(`cannot mark complete from status '${g.status}'`);
       }
       const now = Date.now();
@@ -189,6 +189,10 @@ export class GoalsRepo {
 
   testHelper_setResumeAt(session_id: string, ms: number): void {
     this.db.prepare("UPDATE goals SET resume_at_ms = ? WHERE session_id = ?").run(ms, session_id);
+  }
+
+  testHelper_setStatus(session_id: string, status: GoalStatus): void {
+    this.db.prepare("UPDATE goals SET status = ? WHERE session_id = ?").run(status, session_id);
   }
 
   private recordEvent(
