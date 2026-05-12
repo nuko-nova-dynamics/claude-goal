@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest a new command, command flag, behavior, or integration
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: |
+        Describe the user pain or missing capability. Be specific —
+        "the budget doesn't track X" is more useful than "budgets need work."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        What should the plugin do? Where in the surface (command, hook, MCP
+        tool, statusline)? If you have a concrete API sketch, include it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you think about? Why didn't it work?
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: |
+        Linked discussions, related issues, prior art in other tools
+        (Codex `/goal`, Anthropic native `/goal`, agent frameworks, etc.)
+    validations:
+      required: false
