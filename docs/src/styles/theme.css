@@ -88,15 +88,34 @@ a {
   padding: 2rem 0 1.5rem;
 }
 
+/* Hide the default splash hero image area since we render the brand banner
+ * as a regular MDX <img> below — Starlight's hero image is hard-cropped to
+ * a square and clips wide lockups. */
 [data-has-hero] .hero > img,
 [data-has-hero] .hero > .hero-html {
-  width: 100%;
-  max-width: 100%;
-  height: auto !important;
-  border-radius: 12px;
+  display: none;
+}
+
+/* Brand banner (logo lockup) rendered as the first piece of MDX content on
+ * the landing. Cream-matched background so the cream art doesn't look like
+ * a floating sticker on dark theme. */
+.brand-banner {
+  margin: 2rem 0 1rem;
+  border-radius: 14px;
   border: 1px solid var(--sl-color-gray-5);
-  background: #f5f0e8; /* matches the cream of the logo art */
+  background: #f5f0e8;
+  overflow: hidden;
+  max-width: 720px;
+}
+
+.brand-banner img {
   display: block;
+  width: 100%;
+  height: auto;
+}
+
+:root[data-theme="light"] .brand-banner {
+  border-color: var(--sl-color-gray-5);
 }
 
 [data-has-hero] .hero h1 {
