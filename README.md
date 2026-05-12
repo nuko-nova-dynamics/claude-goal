@@ -1,49 +1,164 @@
-# claude-goal
+<p align="center">
+  <a href="https://nuko-nova-dynamics.github.io/claude-goal/">
+    <img alt="claude-goal — autonomous goal loop for Claude Code" src=".github/assets/social-card.png" width="720">
+  </a>
+</p>
 
-Codex-style autonomous goal loop for Claude Code. Type `/goal-start "objective"` and the agent self-drives turns until the model passes its own completion audit, the token budget exhausts, or you stop it. Inspired by OpenAI Codex's `/goal` feature.
+<p align="center">
+  <em>Goal-bounded autonomous turns for Claude Code. Set an objective, set a budget, walk away.</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/nuko-nova-dynamics/claude-goal/releases/latest"><img alt="version" src="https://img.shields.io/github/v/release/nuko-nova-dynamics/claude-goal?style=flat&color=D97757&label=release"></a>
+  <a href="https://github.com/nuko-nova-dynamics/claude-goal/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/github/license/nuko-nova-dynamics/claude-goal?style=flat&color=4a4a4a"></a>
+  <a href="https://github.com/nuko-nova-dynamics/claude-goal/actions/workflows/test.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/nuko-nova-dynamics/claude-goal/test.yml?branch=main&style=flat&label=tests"></a>
+  <img alt="claude code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=flat">
+  <img alt="tests" src="https://img.shields.io/badge/tests-188_green-4a4a4a?style=flat">
+</p>
+
+<p align="center">
+  <a href="https://nuko-nova-dynamics.github.io/claude-goal/">Docs</a>
+  &nbsp;·&nbsp;
+  <a href="#install">Install</a>
+  &nbsp;·&nbsp;
+  <a href="#commands">Commands</a>
+  &nbsp;·&nbsp;
+  <a href="#how-it-works">How it works</a>
+  &nbsp;·&nbsp;
+  <a href="ROADMAP.md">Roadmap</a>
+</p>
+
+---
+
+> [!NOTE]
+> **Public beta.** The happy path is real-Claude-validated end-to-end across five acceptance scenarios; outside-user miles are still accumulating. File issues against anything surprising.
+
+## What is this
+
+`claude-goal` is a Claude Code plugin that drives the agent through an autonomous loop until a goal is provably met. Type `/goal-start "objective"` and the agent self-iterates — each turn ends in a Stop-hook continuation that feeds the next prompt — until **one** of the following: the model passes its own completion audit, the token budget exhausts, the turn count exhausts, or you stop it.
+
+It's a production-grade companion to Claude Code 2.1.139+'s built-in `/goal`. The native command is great for casual conditions; this plugin adds **deterministic budgets, lifecycle controls, `/compact` recovery, persistence across restarts, and a tool-equipped evaluator subagent** that verifies completion by running tests / reading files / checking exit codes — not by trusting the worker's self-narrative.
 
 ## vs Claude Code's built-in `/goal`
 
-Claude Code v2.1.139+ ships a native `/goal` command (session-scoped Stop hook + Haiku evaluator). It's the right choice for casual "work until this condition holds" tasks. `claude-goal` is the production-grade alternative when you need more control:
-
-| | Built-in `/goal` (CC 2.1.139+) | `claude-goal` (this plugin) |
+| | Built-in `/goal` (2.1.139+) | `claude-goal` |
 |---|---|---|
-| Set objective + autonomous continuation | yes | yes |
-| Live status/tokens indicator | yes (built-in UI) | via statusline |
-| Token budget enforcement | phrase it in the condition | `--budget N`, deterministic |
-| Turn cap | phrase it in the condition | 50 default, `--add-continuations N` to extend |
-| Wall-clock cap | phrase it in the condition | 4h default, `--add-hours N` to extend |
-| Pause / resume / abandon | `/goal clear` only | `/goal-pause`, `/goal-resume`, `/goal-abandon` |
-| `/compact` resilience | n/a | `accounting_uncertain` flag + `/goal-reconcile` |
-| Cross-session restart persistence | `--resume` resets counters | SQLite preserves counters |
-| `/clear` handling | auto-removes goal | orphan + `/goal-cleanup` to reap |
-| Preflight self-test | n/a | `/goal-doctor` |
-| Completion judgment | fresh Haiku evaluator per turn (transcript-only) | dual path: worker self-audit via `update_goal` (`completed_by: "self_update"`) AND a plugin subagent evaluator (`completed_by: "evaluator"`) that can verify with tools — run the test, read the file, check the exit code — instead of trusting optimistic transcript language |
+| Autonomous continuation | ✓ | ✓ |
+| Token budget | phrase in condition | `--budget N`, deterministic |
+| Turn / time caps | phrase in condition | hard 50-turn / 4h caps, `/goal-extend` to raise |
+| Pause · resume · abandon | `/goal clear` only | `/goal-pause`, `/goal-resume`, `/goal-abandon` |
+| `/compact` recovery | n/a | `accounting_uncertain` flag + `/goal-reconcile` |
+| Restart persistence | counters reset | SQLite preserves everything |
+| Completion judgment | fresh Haiku per turn (transcript-only) | dual path — worker self-audit **and** a plugin subagent that verifies with **tools** |
 
-The two coexist. Use native `/goal` for quick conditions; use this plugin for production autonomous work where budgets, pauses, and recovery matter.
+Run them side-by-side. They don't collide.
 
 ## Quickstart
 
-**Install from the Nuko Nova Tools marketplace (recommended):**
+```bash
+# Install from the Nuko Nova Tools marketplace
+/plugin marketplace add nuko-nova-dynamics/claude-marketplace
+/plugin install claude-goal@nuko-nova-tools
+
+# Start a goal
+/goal-start "list all .ts files under src/ and print a line count for each"
+
+# Or set a token budget upfront
+/goal-start "refactor the auth module to use async/await" --budget 50000
+```
+
+Claude confirms the goal, begins working, and continues across turns without further prompting. When it decides the objective is met, it dispatches the evaluator subagent for verification, then calls `update_goal` and stops.
+
+## How it works
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User
+    participant CC as Claude Code
+    participant Hook as Stop hook
+    participant DB as SQLite
+    participant Eval as goal-evaluator subagent
+
+    User->>CC: /goal-start "objective" --budget 50000
+    CC->>DB: create_goal (status=active)
+    loop until done / paused / capped
+        CC->>CC: assistant turn (tools, edits, reasoning)
+        CC->>Hook: Stop event
+        Hook->>DB: account worker + subagent tokens
+        alt budget / cap exhausted
+            Hook->>DB: status=budget_limited / paused
+            Hook-->>CC: emit one-shot reason, stop
+        else still going
+            Hook-->>CC: {"decision":"block","reason":"<continuation>"}
+        end
+    end
+    CC->>Eval: dispatch claude-goal:goal-evaluator
+    Eval->>Eval: run tests, read files, check exit codes
+    Eval-->>CC: {"verdict":"complete"|"incomplete"|"unverifiable"}
+    CC->>DB: update_goal status=complete completed_by=evaluator
+    Hook->>Hook: F5 — bounded retry to catch late completion-turn tokens
+```
+
+<details>
+<summary><strong>Mechanics in a paragraph each</strong></summary>
+
+**Stop hook — continuation injection.** After every turn `scripts/stop.sh` fires. If a goal is `active`, the hook emits `{"decision":"block","reason":"<continuation prompt>"}` and Claude Code feeds that prompt back to the model. The continuation prompt — adapted from Codex's `continuation.md` — reminds the model of the objective and asks it to either keep working or call `update_goal` if done.
+
+**Token accounting.** `scripts/post-tool-batch.sh` reads the session transcript JSONL after every tool batch, finds assistant messages past the last cursor, and sums `input_tokens + cache_creation_input_tokens + output_tokens`. Cache-read tokens are excluded. Parent-worker counts go to `tokens_used`; subagent counts go to `subagent_tokens` through per-agent cursors stored in `subagent_token_cursors`.
+
+**Completion — dual path.** The worker can self-audit and call `update_goal status:complete` (`completed_by: "self_update"`). The continuation prompt also instructs the worker to dispatch the `claude-goal:goal-evaluator` subagent before declaring done. The evaluator runs in a fresh context with `Bash + Read + jq + sqlite3` — it reads the objective from the DB, queries real state with tools, and returns `{"verdict":"complete"|"incomplete"|"unverifiable"}`. On `complete`, the worker calls `update_goal completed_by:"evaluator"`, which logs a distinct `goal_completed_by_evaluator` event. The two paths coexist; evaluator is preferred, self-audit is the fallback.
+
+**Budget / cap enforcement.** At the start of each Stop hook run, the hook checks `(tokens_used + subagent_tokens) >= token_budget`, `continuations_remaining <= 0`, and elapsed wall-clock. Any breach transitions the goal to `paused` with `paused_reason` set before checking for completion.
+
+**F5 final-turn accounting.** The completion turn's tokens are captured by a bounded retry loop after `detect_update_goal` returns true, and again when `update_goal` has already moved the row to `complete` before Stop reads the final transcript bytes. Five retries at 100ms intervals re-run `account_advance_inline` to catch transcripts that flush after the start-of-hook accounting pass.
+
+**State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, continuation budget, wall-clock usage, and a full audit log in `goal_events`. Schema is migration-versioned with v1→v2 transactional upgrade for the subagent cursor table.
+
+**MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, `update_goal`. Slash-command skills invoke `create_goal`; the worker invokes `update_goal` on completion; all other lifecycle ops go through `scripts/goal-cli.sh`.
+
+</details>
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/goal-start "objective" [--budget N]` | Start a new goal. Replaces any prior completed/abandoned goal for this session. |
+| `/goal-status` | Current goal, status, worker + subagent tokens, continuations remaining, warnings. |
+| `/goal-pause` · `/goal-resume` | User pause/resume. |
+| `/goal-abandon` (`/goal-stop`) | Abandon permanently. Stops the auto-continuation loop. |
+| `/goal-extend --add-continuations N` | Raise turn cap on a `continuation_cap`-paused goal and resume. |
+| `/goal-extend --add-hours N` | Raise wall-clock cap on a `wall_clock_cap`-paused goal and resume. |
+| `/goal-reconcile --accept-reset` | Clear the `accounting_uncertain` flag set after `/compact`. Resets accounting to the current transcript cursor. |
+| `/goal-doctor` | Preflight self-test: SQLite, MCP connectivity, hook registration, shell deps. |
+| `/goal-history [--all] [--format=json]` | Tracked goals for this session, or `--all` for cross-session, sorted newest first. |
+| `/goal-cleanup --list` · `--delete [--older-than HOURS]` | Surface and reap orphaned goals left by `/clear`. |
+
+## Install
+
+### From the Nuko Nova Tools marketplace (recommended)
 
 ```
 /plugin marketplace add nuko-nova-dynamics/claude-marketplace
 /plugin install claude-goal@nuko-nova-tools
 ```
 
-That's it — Claude Code clones the plugin, registers the MCP server, and the `/goal-start` skill becomes available immediately. Updates land via `/plugin update claude-goal`.
+Updates land via `/plugin update claude-goal` once new versions are tagged.
 
-**Install from the release tarball (offline / air-gapped):**
+<details>
+<summary><strong>From the release tarball</strong> (offline / air-gapped)</summary>
 
 ```bash
 mkdir -p ~/.claude/plugins/local/claude-goal
-tar -xzf claude-goal-v0.1.0.tar.gz -C ~/.claude/plugins/local/claude-goal
+tar -xzf claude-goal-v0.1.1.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 
-The tarball ships the prebuilt MCP `dist/`, pruned production runtime dependencies under `mcp/goal-server/node_modules`, and the release license/notes, so no package-manager install step is needed on the target machine beyond a Node 22 runtime to execute the server.
+The tarball ships the prebuilt MCP `dist/`, pruned production dependencies under `mcp/goal-server/node_modules/`, `LICENSE`, `RELEASE_NOTES.md`, and `ROADMAP.md`. No package-manager install needed on the target machine beyond a Node 22 runtime.
+</details>
 
-**Install from git (development / contributors):**
+<details>
+<summary><strong>From git</strong> (development / contributors)</summary>
 
 ```bash
 git clone https://github.com/nuko-nova-dynamics/claude-goal.git
@@ -51,59 +166,9 @@ cd claude-goal
 (cd mcp/goal-server && npm ci && npm run build)
 claude --plugin-dir "$PWD"
 ```
-
-**Start a goal:**
-
-```
-/goal-start "list all .ts files under src/ and print a line count for each"
-```
-
-Expected behavior: Claude confirms the goal, begins working, and continues across turns without further prompting. Each turn the Stop hook injects a continuation prompt. When Claude decides the objective is fully met, it calls `update_goal` with `status: "complete"` and stops.
-
-**With a token budget:**
-
-```
-/goal-start "refactor the auth module to use async/await" --budget 50000
-```
-
-Claude pauses automatically when worker plus subagent token usage reaches the budget, leaving the goal in `budget_limited` status. Use `/goal-extend` to add more budget.
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `/goal-start "objective" [--budget N]` | Start a new autonomous goal. Replaces any prior completed/abandoned goal for this session. |
-| `/goal-status` | Show current goal, status, worker tokens used vs budget, subagent tokens, continuations remaining, and any warnings. |
-| `/goal-pause` | Pause the goal immediately (user-paused). Claude stops self-driving until you resume. |
-| `/goal-resume` | Resume a user-paused goal. |
-| `/goal-abandon` (alias `/goal-stop`) | Abandon the current goal permanently and stop the auto-continuation loop. |
-| `/goal-extend --add-continuations N` | Add N continuation turns to a `continuation_cap`-paused goal and resume it. |
-| `/goal-extend --add-hours N` | Add N hours to a `wall_clock_cap`-paused goal and resume it. |
-| `/goal-reconcile --accept-reset` | Clear the `accounting_uncertain` flag set after `/compact`. Resets token accounting to current transcript cursor and resumes if the goal was paused for that reason. |
-| `/goal-doctor` | Run a preflight self-test: checks SQLite, MCP connectivity, hook registration, and shell dependencies. |
-| `/goal-history` | List the current session's tracked goal (one row per session by schema). Pass `--all` for cross-session history sorted newest-first. Pass `--format=json` for machine-readable output. |
-| `/goal-cleanup --list` | List orphaned goals from sessions where `/clear` was used. Shows all by default; pass `--older-than HOURS` to filter. |
-| `/goal-cleanup --delete` | Delete orphaned goals. Defaults to `--older-than 24` to avoid removing fresh paused goals; override with `--older-than HOURS`. |
-
-## How it works
-
-1. **Stop hook — continuation injection.** After every turn, `scripts/stop.sh` fires. If a goal is `active`, the hook emits `{"decision":"block","reason":"<continuation prompt>"}`, which causes Claude Code to feed the prompt back to the model for the next turn. The continuation prompt (adapted from Codex's `continuation.md`) reminds the model of the objective and asks it to either keep working or call `update_goal` when done.
-
-2. **Token accounting.** `scripts/post-tool-batch.sh` fires after every tool batch. Parent-worker turns read the session transcript JSONL, find assistant messages since the last recorded cursor, and sum `input_tokens + cache_creation_input_tokens + output_tokens`. Subagent turns use `agent_id` to account the nested subagent transcript separately. Parent-worker counts are written to `tokens_used`; subagent counts are written to `subagent_tokens`.
-
-3. **Completion detection — dual path.** Completion can fire from either:
-   - **Worker self-audit:** the worker calls `update_goal` with `status: "complete"`. The Stop hook also scans recent transcript messages for that tool call so it can stay silent instead of injecting another continuation prompt. Event recorded: `goal_completed_by_self_update`.
-   - **Evaluator subagent:** before marking a goal complete, the continuation prompt tells the worker to dispatch `claude-goal:goal-evaluator`. The fresh-context subagent reads the active goal's objective from the DB, inspects recent transcript state, and uses tools to verify the objective against real state. If it returns `{"verdict":"complete"}`, the worker calls `update_goal` with `completed_by: "evaluator"`. Distinct event: `goal_completed_by_evaluator`. The worker self-audit path stays as the always-available fallback if the subagent is unavailable or explicitly skipped.
-
-4. **Budget / cap enforcement.** At the start of each Stop hook run, the hook checks `(tokens_used + subagent_tokens) >= token_budget`, `continuations_remaining <= 0`, and elapsed wall-clock time. Any breach transitions the goal to `paused` with the appropriate `paused_reason` before checking for completion.
-
-5. **State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, continuation budget, wall-clock usage, and a full audit event log in `goal_events`.
-
-6. **MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, and `update_goal`. Slash-command skills invoke `create_goal`; the worker invokes `update_goal` on completion after either self-audit or evaluator confirmation; all other lifecycle operations go through `scripts/goal-cli.sh`.
+</details>
 
 ## Optional statusline
-
-Add a live goal status indicator to the Claude Code status bar by adding this to `~/.claude/settings.json`:
 
 ```json
 {
@@ -114,21 +179,21 @@ Add a live goal status indicator to the Claude Code status bar by adding this to
 }
 ```
 
-The script queries the active session's goal from SQLite and prints one of:
+Renders one of:
 
-- `◎ goal active (12K / 50K)` — active, with budget
+- `◎ goal active (12K / 50K)` — active with budget
 - `◎ goal active (8K)` — active, no budget
-- `◎ goal paused (user)` — paused by user
-- `◎ goal unmet (budget exhausted)` — budget_limited
+- `◎ goal paused (user)` — user paused
+- `◎ goal unmet (budget exhausted)` — budget hit
 - `◎ goal achieved` — complete
 
 ## Known limitations
 
-- **macOS / Linux / WSL only.** The hooks are bash scripts. Native Windows (cmd.exe / Git Bash without a proper bash layer) triggers a fail-fast guard in `stop.sh`. WSL is best-effort and untested.
-- **`/clear` orphans the active goal.** Claude Code's `/clear` creates a new session ID, leaving the old goal's state in SQLite with no session to drive it. Use `/goal-abandon` before clearing, or `/goal-cleanup --list` / `--delete` to surface and reap orphaned rows.
-- **Final-turn accounting is bounded.** F5 catches late completion-turn transcript flushes with five 100ms retries. If Claude Code flushes completion usage after that window, a tiny residual undercount is still possible; the retry is intentionally bounded so Stop hooks do not hang.
-- **Auto mode classifier may block `update_goal`.** Claude Code's Auto mode runs a classifier that can reject tool calls from skills if the objective looks like placeholder text. Use concrete, achievable objectives (e.g. `"add a --verbose flag to the CLI"`, not `"do the task"`).
-- **Plugin upgrade lifecycle is undocumented.** After updating the plugin files, run `claude restart` to reload the MCP server. Hot-reload behavior is not guaranteed.
+- **macOS · Linux · WSL only.** Native Windows triggers a fail-fast guard in `stop.sh`. WSL is best-effort and untested.
+- **Auto-mode classifier may block `update_goal`.** Use concrete, achievable objectives ("add a `--verbose` flag to the CLI" — not "do the task").
+- **`/clear` orphans the active goal.** Use `/goal-abandon` before clearing, or `/goal-cleanup` to reap orphan rows later.
+- **Final-turn accounting is bounded.** F5 catches late completion-turn transcript flushes with five 100ms retries. If Claude Code flushes completion usage after that window, a tiny residual undercount is still possible — the retry is intentionally bounded so Stop hooks do not hang.
+- **Plugin upgrade lifecycle is undocumented upstream.** After updating plugin files, run `claude restart` to reload the MCP server. Hot-reload is not guaranteed.
 
 ## Platform support
 
@@ -136,27 +201,25 @@ The script queries the active session's goal from SQLite and prints one of:
 |---|---|
 | macOS | Tested |
 | Linux | Tested |
-| WSL (Windows Subsystem for Linux) | Best-effort, untested |
-| Native Windows (cmd.exe / Git Bash) | Fail-fast guard — not supported |
+| WSL | Best-effort, untested |
+| Native Windows | Fail-fast guard — not supported |
 
-## For developers / contributors
-
-- **Hook tests:** `tests/` — bats coverage for hooks, skills, integration loops, release packaging, and regression probes
-- **MCP tests:** `mcp/goal-server/test/` — Vitest coverage for the MCP server, migrations, tools, token math, and fixtures
-- **Roadmap:** `ROADMAP.md` — what's planned for v0.2+
-
-Run hook tests:
+## Develop
 
 ```bash
-bats $(rg --files -g '*.bats' tests | sort)
-```
+# Bats — hooks, skills, integration loops, release packaging, regression probes
+bats $(find tests -name '*.bats' | sort)
 
-Run MCP tests:
-
-```bash
+# Vitest — MCP server, migrations, tools, token math, fixtures
 npm --prefix mcp/goal-server test
 ```
+
+Roadmap and design notes live in [`ROADMAP.md`](ROADMAP.md). Full docs at **[nuko-nova-dynamics.github.io/claude-goal](https://nuko-nova-dynamics.github.io/claude-goal/)**.
 
 ## Acknowledgments
 
 The autonomous loop mechanism — Stop hook injecting a continuation prompt, model self-driving until a completion signal — is ported from OpenAI Codex's `/goal` feature (`codex-rs`). The `continuation.md` and `budget-limit.md` prompt templates in `prompts/` are adapted from Codex's `core/templates/goals/` with minor modifications for Claude Code's hook API.
+
+## License
+
+MIT © Nuko Nova Dynamics
