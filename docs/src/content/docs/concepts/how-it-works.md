@@ -18,7 +18,7 @@ sequenceDiagram
     participant DB as SQLite
     participant E as goal-evaluator
 
-    U->>CC: /goal-start "objective" --budget 50000
+    U->>CC: /goal-start "objective" --budget 3000000
     CC->>DB: create_goal (status=active)
     loop until done / paused / capped
         CC->>CC: assistant turn

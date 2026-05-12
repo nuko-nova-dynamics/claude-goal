@@ -32,8 +32,8 @@ For a `--plugin-dir` install, it's whatever you passed to `--plugin-dir` followe
 
 | Output | State |
 |---|---|
-| `◎ goal active (12K / 50K)` | Active with a token budget |
-| `◎ goal active (8K)` | Active, no budget set |
+| `◎ goal active (1.2M / 5M)` | Active with a token budget |
+| `◎ goal active (800K)` | Active, no budget set |
 | `◎ goal paused (user)` | User-paused via `/goal-pause` |
 | `◎ goal paused (continuation_cap)` | Out of continuations |
 | `◎ goal paused (wall_clock_cap)` | Wall-clock cap reached |
@@ -43,6 +43,12 @@ For a `--plugin-dir` install, it's whatever you passed to `--plugin-dir` followe
 | (empty) | No goal for this session |
 
 The token total shown is `tokens_used + subagent_tokens` — the full billable count, same number used for budget enforcement.
+
+Token formatting:
+
+- `< 1000` → raw count
+- `1000–999,999` → `XK` (integer)
+- `>= 1,000,000` → `XM` when divisible, otherwise `X.XM` (one-decimal, truncated)
 
 ## Refresh frequency
 

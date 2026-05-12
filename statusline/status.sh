@@ -35,11 +35,24 @@ REASON=$(echo "$ROW" | jq -r '.[0].paused_reason // ""')
 TU=$(echo "$ROW" | jq -r '.[0].tokens_used // 0')
 TB=$(echo "$ROW" | jq -r '.[0].token_budget // ""')
 
-# Format tokens with K suffix when >= 1000
+# Format tokens. Autonomous goals run in the millions, so we need M:
+#   < 1000        → raw  (e.g. "823")
+#   1000–999,999  → "XK" (integer, e.g. "12K", "999K")
+#   >= 1,000,000  → "XM" when divisible, otherwise "X.XM" (truncated)
 format_tokens() {
   local n=$1
-  if (( n >= 1000 )); then echo "$((n / 1000))K"
-  else echo "$n"
+  if (( n >= 1000000 )); then
+    if (( n % 1000000 == 0 )); then
+      echo "$((n / 1000000))M"
+    else
+      local m_int=$(( n / 1000000 ))
+      local m_frac=$(( (n % 1000000) / 100000 ))
+      echo "${m_int}.${m_frac}M"
+    fi
+  elif (( n >= 1000 )); then
+    echo "$((n / 1000))K"
+  else
+    echo "$n"
   fi
 }
 

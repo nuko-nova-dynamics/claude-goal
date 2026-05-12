@@ -26,3 +26,27 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$output" = "◎ goal active (1K / 5K)" ]
 }
+
+@test "statusline formats million-scale budgets with M suffix" {
+  NOW=$(python3 -c "import time; print(int(time.time()*1000))")
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, tokens_used, token_budget, created_at_ms, updated_at_ms)
+    VALUES ('sM', 'gM', 'million-scale goal', 'active', 1200000, 5000000, $NOW, $NOW);"
+
+  export CLAUDE_SESSION_ID="sM"
+  run "$REPO_ROOT/statusline/status.sh"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "◎ goal active (1.2M / 5M)" ]
+}
+
+@test "statusline shows integer M when divisible" {
+  NOW=$(python3 -c "import time; print(int(time.time()*1000))")
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, tokens_used, token_budget, created_at_ms, updated_at_ms)
+    VALUES ('sM2', 'gM2', 'exact M', 'active', 2000000, 10000000, $NOW, $NOW);"
+
+  export CLAUDE_SESSION_ID="sM2"
+  run "$REPO_ROOT/statusline/status.sh"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "◎ goal active (2M / 10M)" ]
+}

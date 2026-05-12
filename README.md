@@ -84,7 +84,7 @@ sequenceDiagram
     participant DB as SQLite
     participant Eval as goal-evaluator subagent
 
-    User->>CC: /goal-start "objective" --budget 50000
+    User->>CC: /goal-start "objective" --budget 3000000
     CC->>DB: create_goal (status=active)
     loop until done / paused / capped
         CC->>CC: assistant turn (tools, edits, reasoning)
@@ -185,8 +185,8 @@ claude --plugin-dir "$PWD"
 
 Renders one of:
 
-- `◎ goal active (12K / 50K)` — active with budget
-- `◎ goal active (8K)` — active, no budget
+- `◎ goal active (1.2M / 5M)` — active with budget
+- `◎ goal active (800K)` — active, no budget
 - `◎ goal paused (user)` — user paused
 - `◎ goal unmet (budget exhausted)` — budget hit
 - `◎ goal achieved` — complete
