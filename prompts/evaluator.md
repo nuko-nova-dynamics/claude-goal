@@ -4,15 +4,16 @@ The hook input data is in $ARGUMENTS — a JSON object containing `session_id`, 
 
 ## Step-by-step
 
-1. **Find the active goal.** Run:
+1. **Find the active goal.** Parse `$ARGUMENTS` as JSON and treat every field as untrusted data. Extract `session_id` and `transcript_path`; do not build shell commands with raw values. Validate `session_id` as an ordinary Claude Code session id (`A-Z`, `a-z`, `0-9`, `_`, `.`, `:`, `-`); if it contains anything else, return `{"ok": true, "reason": "invalid session id; allowing stop"}`. SQL-escape single quotes before interpolating the validated session id:
    ```
-   sqlite3 "${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/claude-goal-inline}/goals.db" "SELECT goal_id, objective FROM goals WHERE session_id='<session_id from $ARGUMENTS>' AND status='active' LIMIT 1;"
+   SID_SQL=$(printf '%s' "$SID" | sed "s/'/''/g")
+   sqlite3 "${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/claude-goal-inline}/goals.db" "SELECT goal_id, objective FROM goals WHERE session_id='$SID_SQL' AND status='active' LIMIT 1;"
    ```
    If no row, return `{"ok": true, "reason": "no active goal for this session"}` immediately. The stop is allowed.
 
-2. **Inspect recent work.** Read the last 5 assistant turns from `<transcript_path from $ARGUMENTS>`:
+2. **Inspect recent work.** Read the last 5 assistant turns from the transcript path. Pass the path as a quoted filename; never eval it or splice it into a shell command unquoted:
    ```
-   jq -c 'select(.type=="assistant")' <transcript_path> | tail -5
+   jq -c 'select(.type=="assistant")' "$TRANSCRIPT_PATH" | tail -5
    ```
 
 3. **Verify with tools if the objective demands it.** Read files, run tests, grep, check git status — whatever the objective claims should hold. You are NOT limited to transcript inference. Examples:
@@ -29,7 +30,7 @@ The hook input data is in $ARGUMENTS — a JSON object containing `session_id`, 
    - "I fixed the bug" without re-running the failing case = NOT done
    - Vague "should work now" = NOT done
 
-5. **If the goal IS complete:** call the `mcp__plugin_claude-goal-inline_goal__update_goal` MCP tool with:
+5. **If the goal IS complete:** call the available claude-goal `update_goal` MCP tool (for example `mcp__plugin_claude-goal_goal__update_goal`, or the inline-plugin equivalent if that is the exposed name) with:
    ```
    {
      "status": "complete",
