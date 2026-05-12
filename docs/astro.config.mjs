@@ -1,11 +1,13 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import mermaid from "astro-mermaid";
 
 export default defineConfig({
   site: "https://nuko-nova-dynamics.github.io",
   base: "/claude-goal",
   integrations: [
+    mermaid({ theme: "dark", autoTheme: true }),
     starlight({
       title: "claude-goal",
       logo: {

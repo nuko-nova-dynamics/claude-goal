@@ -45,19 +45,21 @@ Returns something like:
 
 ## 3. Add a budget
 
-Cancel the goal and start over with a hard token cap:
+Cancel the goal and start over with a hard token cap. Budgets are measured in **millions** of tokens — autonomous runs burn through 50K (one Claude Code input message) in seconds:
 
 ```
 /goal-abandon
-/goal-start "list every .ts file under src/ and print a line count for each" --budget 25000
+/goal-start "list every .ts file under src/ and print a line count for each" --budget 500000
 ```
 
-When `(tokens_used + subagent_tokens) >= 25000`, the hook transitions the goal to `budget_limited` and emits the one-shot budget-limit prompt. The model sees that prompt, knows the goal is paused, and stops trying to continue.
+For this trivial task, 500K is far more than you need — it's the **floor** that makes any meaningful goal viable. Realistic budgets for actual refactors start at **2–3M** and overnight goals run **10–20M+**. See [Budgets and caps](/claude-goal/concepts/budgets/) for sizing.
 
-To raise the cap and resume:
+When `(tokens_used + subagent_tokens) >= the budget`, the hook transitions the goal to `budget_limited` and emits the one-shot budget-limit prompt. The model sees that prompt, knows the goal is paused, and stops trying to continue.
+
+To raise the turn cap and resume (does not raise the token budget):
 
 ```
-/goal-extend --add-continuations 10
+/goal-extend --add-continuations 50
 ```
 
 ## 4. Pause + resume
@@ -92,4 +94,4 @@ The goal transitions to `abandoned`, the Stop hook stops injecting continuations
 4. **Evaluator subagent** (would have) verified the objective by querying the DB and running tools before marking complete.
 5. **F5 final-turn retry** caught the completion turn's tokens after `update_goal` fired.
 
-[How it works →](/concepts/how-it-works/)
+[How it works →](/claude-goal/concepts/how-it-works/)

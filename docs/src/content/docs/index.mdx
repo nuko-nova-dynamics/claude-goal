@@ -9,7 +9,7 @@ hero:
     alt: Abstract bullseye target with looping motion trails — the claude-goal loop
   actions:
     - text: Quickstart
-      link: /quickstart/
+      link: /claude-goal/quickstart/
       icon: right-arrow
       variant: primary
     - text: View on GitHub
@@ -82,21 +82,21 @@ It's the production-grade companion to Claude Code 2.1.139+'s built-in `/goal` �
 
 Claude confirms the goal, begins working, and the Stop hook feeds it a continuation prompt at the end of each turn. When the objective is met, it dispatches the evaluator subagent for verification, then calls `update_goal` and stops.
 
-For a budget-bounded run:
+For a budget-bounded run — note that real autonomous goals run for **hours and millions of tokens**, so budgets are sized in millions:
 
 ```
-/goal-start "refactor the auth module to use async/await" --budget 50000
+/goal-start "refactor the auth module to use async/await" --budget 3000000
 ```
 
-When `(tokens_used + subagent_tokens) >= 50000`, the hook transitions the goal to `budget_limited` and emits a one-shot budget-limit prompt. Use `/goal-extend --add-continuations N` to raise the cap and resume.
+When `(tokens_used + subagent_tokens) >= 3000000`, the hook transitions the goal to `budget_limited` and emits a one-shot budget-limit prompt. See [Budgets and caps](/claude-goal/concepts/budgets/) for how to size a budget for the shape of your goal.
 
 ## Deep dive
 
 <CardGrid>
-  <LinkCard title="How it works" href="/concepts/how-it-works/" description="Stop-hook continuation, token accounting, completion paths, F5 final-turn retry, SQLite state store." />
-  <LinkCard title="Budgets and caps" href="/concepts/budgets/" description="Token budgets, turn caps, wall-clock caps. Worker vs subagent attribution." />
-  <LinkCard title="Completion evaluator" href="/concepts/evaluator/" description="Why a tool-equipped subagent beats same-model self-audit." />
-  <LinkCard title="State and persistence" href="/concepts/state/" description="The SQLite schema, migration runner, audit event log." />
+  <LinkCard title="How it works" href="/claude-goal/concepts/how-it-works/" description="Stop-hook continuation, token accounting, completion paths, F5 final-turn retry, SQLite state store." />
+  <LinkCard title="Budgets and caps" href="/claude-goal/concepts/budgets/" description="Token budgets, turn caps, wall-clock caps. Worker vs subagent attribution." />
+  <LinkCard title="Completion evaluator" href="/claude-goal/concepts/evaluator/" description="Why a tool-equipped subagent beats same-model self-audit." />
+  <LinkCard title="State and persistence" href="/claude-goal/concepts/state/" description="The SQLite schema, migration runner, audit event log." />
 </CardGrid>
 
 ## Status

@@ -63,11 +63,15 @@ Run them side-by-side. They don't collide.
 # Start a goal
 /goal-start "list all .ts files under src/ and print a line count for each"
 
-# Or set a token budget upfront
-/goal-start "refactor the auth module to use async/await" --budget 50000
+# Or set a token budget — sized in millions, not thousands. Real autonomous
+# refactors run for hours across hundreds of turns.
+/goal-start "refactor the auth module to use async/await" --budget 3000000
 ```
 
 Claude confirms the goal, begins working, and continues across turns without further prompting. When it decides the objective is met, it dispatches the evaluator subagent for verification, then calls `update_goal` and stops.
+
+> [!TIP]
+> **Budget sizing is in millions of tokens.** A single Claude Code input message in a real codebase is already 50K–100K. Floor: `--budget 500000`. Comfortable real-work range: `2M–5M`. Overnight: `20M+`. See [`docs/concepts/budgets`](https://nuko-nova-dynamics.github.io/claude-goal/concepts/budgets/) for sizing intuition.
 
 ## How it works
 
