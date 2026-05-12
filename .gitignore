@@ -7,7 +7,19 @@ dist/
 *.db-wal
 .env
 .env.local
-tests/fixtures/transcripts/captured/
 .runtime-data-dir
 .runtime-session-id
 claude-goal-v*.tar.gz
+
+# Local Claude Code settings — never publish.
+.claude/
+
+# Internal dev artifacts — keep out of the public repo.
+docs/superpowers/
+plans/
+tests/probes/
+tests/phase-*-smoke/
+tests/v0.1.0-*/
+tests/EMPIRICAL_FINDINGS.md
+tests/empirical-findings.json
+tests/fixtures/transcripts/captured/

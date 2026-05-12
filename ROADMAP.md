@@ -71,6 +71,7 @@ Anthropic's native `/goal` works in `claude -p` (one-shot) and Remote Control. P
 
 | Tag | Date | Headline |
 |---|---|---|
-| v0.1.0 | TBD (pending final audit + soak) | Initial public beta — goal lifecycle commands, budgets, `/compact` recovery, SQLite persistence, F5 final-turn accounting, evaluator subagent, per-subagent token attribution, `/goal-history`, and `-p` validation |
+| v0.1.0 | 2026-05-11 | Initial public beta — goal lifecycle commands, budgets, `/compact` recovery, SQLite persistence, F5 final-turn accounting, evaluator subagent, per-subagent token attribution, `/goal-history`, and `-p` validation |
+| v0.1.1 | 2026-05-12 | Maintenance — CI fix, repo hygiene, identity cleanup |
 | v0.1.x | rolling | Bugfixes from outside-user feedback |
 | v0.2.0 | speculative | Multi-objective goals, cost preview, web overlay, marketplace publish |

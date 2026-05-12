@@ -11,10 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
+      - name: Install bash-side dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y bats sqlite3 jq uuid-runtime
+      - name: Set up Node (needed by release-tarball.bats which runs scripts/build-tarball.sh)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mcp/goal-server/package-lock.json
+      - name: Install MCP server deps (build-tarball.sh prunes from these)
+        working-directory: mcp/goal-server
+        run: npm ci
       - name: Run unit bats
         run: bats tests/unit/
       - name: Run integration bats

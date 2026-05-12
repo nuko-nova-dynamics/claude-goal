@@ -1,3 +1,17 @@
+# claude-goal v0.1.1
+
+**Maintenance patch — no functional changes.**
+
+- CI: bats job now installs Node + runs `npm ci` so `release-tarball.bats` (which invokes `scripts/build-tarball.sh`) passes on Ubuntu runners
+- Repo hygiene: removed internal dev artifacts that shouldn't ship publicly (Phase 0 probe data, phase smoke reports, audit handoffs, design spec + implementation plan, captured-transcript fixtures with user-specific paths)
+- Tarball: now ships `ROADMAP.md` and excludes the deleted `docs/` tree
+- `.gitignore`: extended to keep the above patterns and local `.claude/` settings out of the repo
+- Identity: the repo's git history was rewritten in this release to attribute every commit to `Nuko Nova Dynamics <hello@nukonova.com>`; v0.1.0's tag and release were re-cut from the rewritten history with a smaller, cleaner tarball
+
+The plugin's runtime behavior, command surface, and on-disk schema are byte-identical to v0.1.0. Existing v0.1.0 installs do not need to upgrade for any functional reason; this release only cleans up what ships in the public repo and tarball.
+
+---
+
 # claude-goal v0.1.0
 
 A Claude Code plugin that ports OpenAI Codex's `/goal` autonomous loop. Type `/goal-start "objective"` and the agent self-drives turns until the model passes its own completion audit, the token budget exhausts, or a cap fires.

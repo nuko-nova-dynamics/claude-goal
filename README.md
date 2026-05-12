@@ -141,10 +141,9 @@ The script queries the active session's goal from SQLite and prints one of:
 
 ## For developers / contributors
 
-- **Design spec:** `docs/superpowers/specs/2026-05-09-claude-goal-design.md`
-- **Implementation plan:** `docs/superpowers/plans/2026-05-09-claude-goal-implementation.md`
 - **Hook tests:** `tests/` — bats coverage for hooks, skills, integration loops, release packaging, and regression probes
 - **MCP tests:** `mcp/goal-server/test/` — Vitest coverage for the MCP server, migrations, tools, token math, and fixtures
+- **Roadmap:** `ROADMAP.md` — what's planned for v0.2+
 
 Run hook tests:
 
