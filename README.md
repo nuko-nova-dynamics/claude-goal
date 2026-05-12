@@ -81,14 +81,14 @@ Claude pauses automatically when `tokens_used` reaches the budget, leaving the g
 2. **Token accounting.** `scripts/post-tool-batch.sh` fires after every tool batch. It reads the session transcript JSONL, finds the assistant messages since the last recorded cursor, and sums `input_tokens + output_tokens` from each message's usage metadata. Accumulated counts are written to SQLite.
 
 3. **Completion detection — dual path.** Completion can fire from either:
-   - **Worker self-audit:** the Stop hook scans the latest assistant message in the transcript for a `tool_use` calling `update_goal` with `status: "complete"`. On detection it transitions the goal to `complete` and does **not** inject a continuation prompt. Event recorded: `goal_completed_by_self_update`.
+   - **Worker self-audit:** the worker calls `update_goal` with `status: "complete"`. The Stop hook also scans recent transcript messages for that tool call so it can stay silent instead of injecting another continuation prompt. Event recorded: `goal_completed_by_self_update`.
    - **Agent-hook evaluator** (parallel agent hook in `hooks/hooks.json`): after every turn, a fresh-context Claude subagent reads the active goal's objective from the DB, inspects the recent transcript, and — critically — uses tools to verify the objective against real state (runs the test, reads the file, checks the exit code). If verifiably complete, it calls `update_goal` with `completed_by: "evaluator"`. Distinct event: `goal_completed_by_evaluator`. This is the architectural separation that beats same-model self-audit's sunk-cost bias. Note: agent hooks are marked experimental in Claude Code's documentation; the worker self-audit path stays as the always-available signal in case the agent-hook contract changes.
 
 4. **Budget / cap enforcement.** At the start of each Stop hook run, the hook checks `tokens_used >= token_budget`, `continuations_remaining <= 0`, and elapsed wall-clock time. Any breach transitions the goal to `paused` with the appropriate `paused_reason` before checking for completion.
 
 5. **State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, continuation budget, wall-clock usage, and a full audit event log in `goal_events`.
 
-6. **MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, and `update_goal`. Slash-command skills invoke `create_goal`; the Stop hook invokes `update_goal` on completion; all other lifecycle operations go through `scripts/goal-cli.sh`.
+6. **MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, and `update_goal`. Slash-command skills invoke `create_goal`; the worker or evaluator invokes `update_goal` on completion; all other lifecycle operations go through `scripts/goal-cli.sh`.
 
 ## Optional statusline
 
@@ -117,8 +117,8 @@ The script queries the active session's goal from SQLite and prints one of:
 
 - **macOS / Linux / WSL only.** The hooks are bash scripts. Native Windows (cmd.exe / Git Bash without a proper bash layer) triggers a fail-fast guard in `stop.sh`. WSL is best-effort and untested.
 - **`/clear` orphans the active goal.** Claude Code's `/clear` creates a new session ID, leaving the old goal's state in SQLite with no session to drive it. Use `/goal-abandon` before clearing. `/goal-cleanup` (Phase 6.4) will list and delete orphans.
-- **Subagent token usage is partially counted.** The `PostToolBatch` hook fires on the parent session for subagent tool calls, so subagent activity is accounted for via the parent transcript — same as Codex parity. Dedicated per-subagent cursors are deferred to v0.2.
-- **Final turn's tokens at completion are undercounted.** The token accounting catchup runs at the *start* of the Stop hook, before `update_goal` is detected. The completion turn's own token cost is recorded in the *next* hook invocation, which never fires after `complete`. This is tracked as F5 and deferred to v0.2.
+- **Subagent token usage is partially counted.** The `PostToolBatch` hook fires on the parent session for subagent tool calls, so subagent activity is accounted for via the parent transcript — same as Codex parity. Dedicated per-subagent cursors are Phase 2 v0.1.0 work.
+- **Final-turn accounting is bounded.** F5 catches late completion-turn transcript flushes with five 100ms retries. If Claude Code flushes completion usage after that window, a tiny residual undercount is still possible; the retry is intentionally bounded so Stop hooks do not hang.
 - **Auto mode classifier may block `update_goal`.** Claude Code's Auto mode runs a classifier that can reject tool calls from skills if the objective looks like placeholder text. Use concrete, achievable objectives (e.g. `"add a --verbose flag to the CLI"`, not `"do the task"`).
 - **Plugin upgrade lifecycle is undocumented.** After updating the plugin files, run `claude restart` to reload the MCP server. Hot-reload behavior is not guaranteed.
 

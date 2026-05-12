@@ -37,7 +37,7 @@ Implementation:
 
 **Status:** SHIPPED in `scripts/stop.sh` (commit 8a2b90e).
 
-The completion turn's tokens are now captured by a bounded retry loop after `detect_update_goal` returns true. Five retries at 100ms intervals re-run `account_advance_inline` to catch transcripts that flush after the start-of-hook accounting pass. Records a `final_turn_accounted` event when the retry advances the byte offset.
+The completion turn's tokens are now captured by a bounded retry loop after `detect_update_goal` returns true, and also when `update_goal` has already transitioned the row to `complete` before Stop reads the final transcript bytes. Five retries at 100ms intervals re-run `account_advance_inline` to catch transcripts that flush after the start-of-hook accounting pass. Records a `final_turn_accounted` event when the retry advances the byte offset.
 
 ## v0.1.0 — phase 2 pending
 

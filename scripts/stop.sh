@@ -181,9 +181,45 @@ BL_REPORTED=$(echo "$ROW_JSON" | jq -r '.[0].budget_limit_reported // 0')
 LAST_ACCOUNTED_OFFSET=$(echo "$ROW_JSON" | jq -r '.[0].last_accounted_byte_offset // 0')
 VERSION=$(echo "$ROW_JSON" | jq -r '.[0].version // 0')
 GOAL_ID_ESC=$(sql_escape "$GOAL_ID")
+STATUS_ESC=$(sql_escape "$STATUS")
+
+run_f5_final_turn_accounting() {
+  local baseline_offset="$LAST_ACCOUNTED_OFFSET"
+  local before_offset="$LAST_ACCOUNTED_OFFSET"
+  local after_offset
+
+  for retry in 1 2 3 4 5; do
+    sleep 0.1
+    account_advance_inline "$SESSION_ID" "$TRANSCRIPT" 2>/dev/null || true
+    after_offset=$(sql_retry "SELECT COALESCE(last_accounted_byte_offset, 0) FROM goals WHERE session_id = '$SESSION_ID_ESC';" 2>/dev/null || echo "0")
+    if [[ "$after_offset" != "$before_offset" ]]; then
+      log_info "stop: F5 caught additional tokens after ${retry} retry (offset $before_offset -> $after_offset)"
+      before_offset="$after_offset"
+      # Continue looping in case more content flushes.
+    fi
+  done
+
+  # Record an explicit F5 event only when a retry advanced beyond the
+  # start-of-hook accounting cursor. This can happen after update_goal has
+  # already transitioned the row to complete.
+  sql_retry "INSERT INTO goal_events
+    (session_id, goal_id, hook_name, event_type, status_before, status_after,
+     version_before, version_after, pid, created_at_ms)
+    SELECT '$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'final_turn_accounted',
+      '$STATUS_ESC', status, $VERSION, version, $$, $NOW
+    FROM goals
+    WHERE session_id = '$SESSION_ID_ESC'
+      AND goal_id = '$GOAL_ID_ESC'
+      AND last_accounted_byte_offset > $baseline_offset;" 2>/dev/null || true
+}
 
 case "$STATUS" in
-  complete|abandoned|paused)
+  complete)
+    log_info "stop: goal already complete; running F5 final-turn accounting"
+    run_f5_final_turn_accounting
+    exit 0
+    ;;
+  abandoned|paused)
     exit 0
     ;;
   active)
@@ -194,28 +230,7 @@ case "$STATUS" in
       # Claude Code flush the transcript, then re-account. Bounded so a slow flush
       # doesn't hang the hook. Captures tokens that would otherwise be lost because
       # no further hook invocation fires after the goal transitions to complete.
-      BEFORE_OFFSET="$LAST_ACCOUNTED_OFFSET"
-      for retry in 1 2 3 4 5; do
-        sleep 0.1
-        account_advance_inline "$SESSION_ID" "$TRANSCRIPT" 2>/dev/null || true
-        AFTER_OFFSET=$(sql_retry "SELECT COALESCE(last_accounted_byte_offset, 0) FROM goals WHERE session_id = '$SESSION_ID_ESC';" 2>/dev/null || echo "0")
-        if [[ "$AFTER_OFFSET" != "$BEFORE_OFFSET" ]]; then
-          log_info "stop: F5 caught additional tokens after ${retry} retry (offset $BEFORE_OFFSET -> $AFTER_OFFSET)"
-          BEFORE_OFFSET="$AFTER_OFFSET"
-          # Continue looping in case more turns flush
-        fi
-      done
-      # Record an explicit F5 event so the audit trail shows the final-turn account ran
-      sql_retry "INSERT INTO goal_events
-        (session_id, goal_id, hook_name, event_type, status_before, status_after,
-         version_before, version_after, pid, created_at_ms)
-        SELECT '$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'final_turn_accounted',
-          'active', 'active', $VERSION, $VERSION, $$, $NOW
-        WHERE EXISTS (
-          SELECT 1 FROM goals WHERE session_id = '$SESSION_ID_ESC'
-            AND goal_id = '$GOAL_ID_ESC'
-            AND last_accounted_byte_offset > $LAST_ACCOUNTED_OFFSET
-        );" 2>/dev/null || true
+      run_f5_final_turn_accounting
       exit 0
     fi
     ;;
@@ -397,15 +412,30 @@ CONT_PAYLOAD=$(jq -cn \
   '{assistant_uuid:$assistant_uuid, assistant_message_hash:$assistant_message_hash, last_accounted_byte_offset:$last_accounted_byte_offset}')
 CONT_PAYLOAD_ESC=$(sql_escape "$CONT_PAYLOAD")
 
-# Record continuation_injected event, gated by WHERE EXISTS (version race loser won't emit)
-sql_retry "INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, decision, status_before, status_after, version_before, version_after, payload_json, pid, created_at_ms)
+# Record continuation_injected event, gated by WHERE EXISTS (version race loser won't emit).
+# The insert result controls whether we return a block; if the agent evaluator
+# completed the goal after the decrement, the event insert is skipped and Stop
+# exits silently instead of forcing one extra continuation turn.
+CONT_EVENT_RESULT=$(sql_retry "
+  INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, decision, status_before, status_after, version_before, version_after, payload_json, pid, created_at_ms)
   SELECT '$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'continuation_injected', 'block', 'active', 'active', $VERSION, $((VERSION + 1)), '$CONT_PAYLOAD_ESC', $$, $NOW
   WHERE EXISTS (
-    SELECT 1 FROM goals WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC' AND version = $((VERSION + 1))
-  );"
+    SELECT 1 FROM goals
+    WHERE session_id = '$SESSION_ID_ESC'
+      AND goal_id = '$GOAL_ID_ESC'
+      AND version = $((VERSION + 1))
+      AND status = 'active'
+  );
+  SELECT changes();
+" 2>/dev/null || echo "0")
+CONT_EVENT_CHANGES=$(sql_change_count "$CONT_EVENT_RESULT")
 
 # Release the lease — next Stop hook needs to acquire its own
 lease_release "$SESSION_ID" $$
 
-echo "$JSON"
+if [[ "$CONT_EVENT_CHANGES" = "1" ]]; then
+  echo "$JSON"
+else
+  log_info "stop: continuation event race lost"
+fi
 exit 0

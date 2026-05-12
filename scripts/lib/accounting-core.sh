@@ -183,11 +183,11 @@ account_advance_inline() {
   # Read current state (short auto-commit read; WAL allows concurrent readers).
   local row
   row=$(sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" \
-    "SELECT goal_id || '|' || tokens_used || '|' || version || '|' || COALESCE(token_budget,'') || '|' || last_accounted_byte_offset || '|' || COALESCE(last_accounted_uuid, '') FROM goals WHERE session_id = '$(sql_escape "$session_id")';" 2>/dev/null)
+    "SELECT goal_id || '|' || status || '|' || tokens_used || '|' || version || '|' || COALESCE(token_budget,'') || '|' || last_accounted_byte_offset || '|' || COALESCE(last_accounted_uuid, '') FROM goals WHERE session_id = '$(sql_escape "$session_id")';" 2>/dev/null)
   [[ -z "$row" ]] && return 0
 
-  local goal_id tokens_used version token_budget byte_offset last_uuid
-  IFS='|' read -r goal_id tokens_used version token_budget byte_offset last_uuid <<< "$row"
+  local goal_id current_status tokens_used version token_budget byte_offset last_uuid
+  IFS='|' read -r goal_id current_status tokens_used version token_budget byte_offset last_uuid <<< "$row"
 
   local now
   now=$(ms_now)
@@ -293,16 +293,22 @@ account_advance_inline() {
 
   # Atomic budget transition: flip to budget_limited in the same UPDATE.
   local budget_clause=""
-  if [[ -n "$token_budget" ]] && (( new_tokens_used >= token_budget )); then
+  if [[ "$current_status" != "complete" && -n "$token_budget" ]] && (( new_tokens_used >= token_budget )); then
     budget_clause=",
       status = 'budget_limited',
       time_used_seconds = time_used_seconds + COALESCE(($now - resume_at_ms) / 1000, 0),
       resume_at_ms = NULL"
   fi
 
+  local status_guard="'active','budget_limited'"
+  if [[ "$current_status" == "complete" ]]; then
+    status_guard="'active','budget_limited','complete'"
+  fi
+
   # Single sqlite3 invocation: BEGIN IMMEDIATE ... COMMIT.
   # Fix 1: INSERT uses WHERE EXISTS so it only fires when the UPDATE actually incremented version.
-  # Fix 2: status IN ('active', 'budget_limited') closes the concurrent-pause window.
+  # Fix 2: status guard closes concurrent pause/abandon windows while still
+  # allowing F5 to account final tokens after update_goal has completed the row.
   local TX_RESULT
   TX_RESULT=$(sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
     BEGIN IMMEDIATE;
@@ -315,7 +321,7 @@ account_advance_inline() {
       updated_at_ms = $now
       $budget_clause
     WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $version
-      AND status IN ('active', 'budget_limited');
+      AND status IN ($status_guard);
     INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, tokens_delta, version_before, version_after, pid, created_at_ms)
       SELECT '$sid_esc', '$gid_esc', 'post-tool-batch', 'tokens_accounted', $tokens_delta, $version, $((version + 1)), $$, $now
       WHERE EXISTS (

@@ -216,39 +216,50 @@ EOF
 }
 
 @test "F5: retry loop emits event when it catches a late-flushing transcript" {
-  # Simulate the race: at start-of-hook, the transcript only contains the
-  # user message (no assistant turn yet). Write the assistant turn between
-  # the start-of-hook accounting pass and the F5 retry loop.
-  # We force this by pre-setting last_accounted_byte_offset to the user-only
-  # transcript size and leaving the assistant message to be appended at
-  # runtime via a delay trick.
+  cat > "$TRANSCRIPT" <<'EOF'
+{"type":"user","uuid":"u0","message":{"role":"user","content":[{"type":"text","text":"go"}]}}
+{"type":"assistant","uuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"done"},{"type":"tool_use","name":"update_goal","input":{"status":"complete"}}]}}
+EOF
+  VISIBLE_SIZE=$(stat -f%z "$TRANSCRIPT" 2>/dev/null || stat -c%s "$TRANSCRIPT")
+  sqlite3 "$DB_PATH" "UPDATE goals SET last_accounted_byte_offset = $VISIBLE_SIZE, last_accounted_uuid = 'u1', tokens_used = 0 WHERE session_id='s1';"
+  # The completion signal is visible, but the usage-bearing final record arrives
+  # after the first accounting pass, while stop.sh is in its bounded F5 retry.
+  (
+    sleep 0.15
+    cat >> "$TRANSCRIPT" <<'EOF'
+{"type":"assistant","uuid":"u2","message":{"role":"assistant","content":[{"type":"text","text":"tool result observed"}],"usage":{"input_tokens":200,"output_tokens":80}}}
+EOF
+  ) &
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":false}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
+  wait
+  [ "$status" -eq 0 ]
+  TOKENS=$(sqlite3 "$DB_PATH" "SELECT tokens_used FROM goals WHERE session_id='s1';")
+  [ "$TOKENS" = "280" ]
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='final_turn_accounted';")
+  [ "$EVENTS" = "1" ]
+}
+
+@test "F5: completed goal still catches late final-turn tokens" {
   cat > "$TRANSCRIPT" <<'EOF'
 {"type":"user","uuid":"u0","message":{"role":"user","content":[{"type":"text","text":"go"}]}}
 EOF
   USER_ONLY_SIZE=$(stat -f%z "$TRANSCRIPT" 2>/dev/null || stat -c%s "$TRANSCRIPT")
-  sqlite3 "$DB_PATH" "UPDATE goals SET last_accounted_byte_offset = $USER_ONLY_SIZE, last_accounted_uuid = 'u0', tokens_used = 0 WHERE session_id='s1';"
-  # Append the completion turn AFTER a brief delay, while stop.sh is in its F5 retry loop
+  sqlite3 "$DB_PATH" "UPDATE goals SET status='complete', last_accounted_byte_offset = $USER_ONLY_SIZE, last_accounted_uuid = 'u0', tokens_used = 0 WHERE session_id='s1';"
   (
     sleep 0.15
     cat >> "$TRANSCRIPT" <<'EOF'
 {"type":"assistant","uuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"done"},{"type":"tool_use","name":"update_goal","input":{"status":"complete"}}],"usage":{"input_tokens":200,"output_tokens":80}}}
 EOF
   ) &
-  # Without the assistant message visible at start-of-hook, detect_update_goal
-  # initially fails — so we manually preseed the assistant message FIRST then
-  # rewrite the offset to simulate the race. Refactor: write assistant message
-  # synchronously but trick the offset to LOOK like it wasn't accounted yet.
-  wait
-  # By now the assistant turn is in the transcript. Reset offset to user-only
-  # so the first accounting pass catches the assistant turn; F5 retry then
-  # finds no new content and stays quiet.
-  sqlite3 "$DB_PATH" "UPDATE goals SET last_accounted_byte_offset = $USER_ONLY_SIZE, tokens_used = 0 WHERE session_id='s1';"
   INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":false}"
   run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
+  wait
   [ "$status" -eq 0 ]
-  # Completion turn (200 + 80 = 280) accounted — F5 event recorded since offset advanced
-  TOKENS=$(sqlite3 "$DB_PATH" "SELECT tokens_used FROM goals WHERE session_id='s1';")
-  [ "$TOKENS" = "280" ]
+  ROW=$(sqlite3 "$DB_PATH" "SELECT status || '|' || tokens_used FROM goals WHERE session_id='s1';")
+  [ "$ROW" = "complete|280" ]
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='final_turn_accounted' AND status_before='complete' AND status_after='complete';")
+  [ "$EVENTS" = "1" ]
 }
 
 @test "stop hook releases lease after injection" {
@@ -292,6 +303,31 @@ EOF
   [ -z "$output" ]
   REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals WHERE session_id='s1';")
   [ "$REM" = "50" ]
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='continuation_injected';")
+  [ "$EVENTS" = "0" ]
+  LEASES=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM continuation_leases WHERE session_id='s1';")
+  [ "$LEASES" = "0" ]
+}
+
+@test "stop hook exits silently when evaluator completes after continuation decrement" {
+  sqlite3 "$DB_PATH" "
+    CREATE TRIGGER complete_goal_after_decrement
+    AFTER UPDATE OF continuations_remaining ON goals
+    WHEN NEW.continuations_remaining = OLD.continuations_remaining - 1
+    BEGIN
+      UPDATE goals
+        SET status = 'complete',
+            resume_at_ms = NULL,
+            version = version + 1
+        WHERE session_id = NEW.session_id;
+    END;
+  "
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":false}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  ROW=$(sqlite3 "$DB_PATH" "SELECT status || '|' || continuations_remaining FROM goals WHERE session_id='s1';")
+  [ "$ROW" = "complete|49" ]
   EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='continuation_injected';")
   [ "$EVENTS" = "0" ]
   LEASES=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM continuation_leases WHERE session_id='s1';")
