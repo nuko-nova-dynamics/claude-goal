@@ -47,3 +47,11 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   [ "$status" -eq 0 ]
   [ "$output" = "session=sess-123" ]
 }
+
+@test "render_template substitutes worker and subagent token split" {
+  echo 'tokens=${TOKENS_USED} worker=${WORKER_TOKENS_USED} subagents=${SUBAGENT_TOKENS}' > "$TMPDIR_TEST/t.md"
+  export OBJECTIVE_RAW="x" BUDGET_WARNING="" TOKENS_USED="150" WORKER_TOKENS_USED="100" SUBAGENT_TOKENS="50" TOKEN_BUDGET="" REMAINING_TOKENS="" TIME_USED_SECONDS="" SESSION_ID="s1"
+  run render_template "$TMPDIR_TEST/t.md"
+  [ "$status" -eq 0 ]
+  [ "$output" = "tokens=150 worker=100 subagents=50" ]
+}

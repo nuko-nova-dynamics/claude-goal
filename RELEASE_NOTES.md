@@ -33,7 +33,7 @@ This is a **public beta**. The happy path is real-Claude-validated end-to-end ac
 
 ### Tests
 
-127 bats + 59 Vitest = **186 green**. GitHub Actions CI on Ubuntu.
+129 bats + 59 Vitest = **188 green**. GitHub Actions CI on Ubuntu.
 
 ## Install
 
