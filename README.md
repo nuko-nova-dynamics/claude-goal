@@ -24,15 +24,16 @@ The two coexist. Use native `/goal` for quick conditions; use this plugin for pr
 
 ## Quickstart
 
-**Install** (session-local, current working method until marketplace publish):
+**Install from the Nuko Nova Tools marketplace (recommended):**
 
-```bash
-claude --plugin-dir /path/to/claude-goal
+```
+/plugin marketplace add nuko-nova-dynamics/claude-marketplace
+/plugin install claude-goal@nuko-nova-tools
 ```
 
-> Note: `claude plugin install --local` requires a marketplace scope not yet available in Claude Code 2.1.x. `--plugin-dir` is the supported alternative. After upgrading the plugin, run `claude restart` to reload the MCP server.
+That's it — Claude Code clones the plugin, registers the MCP server, and the `/goal-start` skill becomes available immediately. Updates land via `/plugin update claude-goal`.
 
-**Install from release tarball:**
+**Install from the release tarball (offline / air-gapped):**
 
 ```bash
 mkdir -p ~/.claude/plugins/local/claude-goal
@@ -41,6 +42,15 @@ claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 
 The tarball ships the prebuilt MCP `dist/`, pruned production runtime dependencies under `mcp/goal-server/node_modules`, and the release license/notes, so no package-manager install step is needed on the target machine beyond a Node 22 runtime to execute the server.
+
+**Install from git (development / contributors):**
+
+```bash
+git clone https://github.com/nuko-nova-dynamics/claude-goal.git
+cd claude-goal
+(cd mcp/goal-server && npm ci && npm run build)
+claude --plugin-dir "$PWD"
+```
 
 **Start a goal:**
 

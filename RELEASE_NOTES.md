@@ -37,7 +37,16 @@ This is a **public beta**. The happy path is real-Claude-validated end-to-end ac
 
 ## Install
 
-### From the release tarball
+### From the Nuko Nova Tools marketplace (recommended)
+
+```
+/plugin marketplace add nuko-nova-dynamics/claude-marketplace
+/plugin install claude-goal@nuko-nova-tools
+```
+
+Updates via `/plugin update claude-goal` once new versions are tagged.
+
+### From the release tarball (offline / air-gapped)
 
 ```bash
 mkdir -p ~/.claude/plugins/local/claude-goal
