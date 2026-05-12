@@ -13,6 +13,18 @@ setup() {
   # Output must be JSON with hookSpecificOutput.additionalContext mentioning session_id
   CTX=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext // ""')
   [[ "$CTX" == *"sess-abc"* ]]
+  [[ "$CTX" == *"claude-goal MCP tools"* ]]
+  EVT=$(echo "$output" | jq -r '.hookSpecificOutput.hookEventName // ""')
+  [ "$EVT" = "UserPromptExpansion" ]
+}
+
+@test "expansion hook on /goal-start emits additionalContext with session_id" {
+  INPUT='{"command_name":"goal-start","session_id":"sess-start","expanded_prompt":"some body"}'
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/user-prompt-expansion.sh"
+  [ "$status" -eq 0 ]
+  CTX=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext // ""')
+  [[ "$CTX" == *"sess-start"* ]]
+  [[ "$CTX" == *"claude-goal MCP tools"* ]]
   EVT=$(echo "$output" | jq -r '.hookSpecificOutput.hookEventName // ""')
   [ "$EVT" = "UserPromptExpansion" ]
 }
@@ -37,6 +49,16 @@ setup() {
   [ "$status" -eq 0 ]
   CTX=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext // ""')
   [[ "$CTX" == *"sess-ns"* ]]
+  EVT=$(echo "$output" | jq -r '.hookSpecificOutput.hookEventName // ""')
+  [ "$EVT" = "UserPromptExpansion" ]
+}
+
+@test "expansion hook on namespaced claude-goal:goal-start emits additionalContext" {
+  INPUT='{"command_name":"claude-goal:goal-start","session_id":"sess-start-ns","expanded_prompt":"build something"}'
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/user-prompt-expansion.sh"
+  [ "$status" -eq 0 ]
+  CTX=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext // ""')
+  [[ "$CTX" == *"sess-start-ns"* ]]
   EVT=$(echo "$output" | jq -r '.hookSpecificOutput.hookEventName // ""')
   [ "$EVT" = "UserPromptExpansion" ]
 }

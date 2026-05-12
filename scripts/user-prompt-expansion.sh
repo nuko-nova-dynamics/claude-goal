@@ -6,9 +6,10 @@ INPUT=$(cat 2>/dev/null || echo "")
 COMMAND_NAME=$(echo "$INPUT" | jq -r '.command_name // ""' 2>/dev/null || echo "")
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""' 2>/dev/null || echo "")
 
-# Match command name "goal" or any namespaced variant like "<plugin>:goal"
+# Match the legacy command name "goal", the current creation command
+# "goal-start", or namespaced variants like "<plugin>:goal-start".
 case "$COMMAND_NAME" in
-  goal|*:goal) ;;
+  goal|*:goal|goal-start|*:goal-start) ;;
   *) exit 0 ;;
 esac
 
@@ -19,6 +20,6 @@ esac
 jq -n --arg sid "$SESSION_ID" '{
   hookSpecificOutput: {
     hookEventName: "UserPromptExpansion",
-    additionalContext: ("When calling create_goal, use session_id=\"" + $sid + "\".")
+    additionalContext: ("When calling claude-goal MCP tools, use session_id=\"" + $sid + "\".")
   }
 }'
