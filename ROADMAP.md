@@ -39,9 +39,7 @@ Implementation:
 
 The completion turn's tokens are now captured by a bounded retry loop after `detect_update_goal` returns true, and also when `update_goal` has already transitioned the row to `complete` before Stop reads the final transcript bytes. Five retries at 100ms intervals re-run `account_advance_inline` to catch transcripts that flush after the start-of-hook accounting pass. Records a `final_turn_accounted` event when the retry advances the byte offset.
 
-## v0.1.0 — phase 2 in progress
-
-These are also v0.1.0 work, queued behind the audit on phase 1.
+## v0.1.0 — phase 2 landed
 
 ### 3. Per-subagent token attribution
 
@@ -49,11 +47,11 @@ Claude Code stores subagent assistant usage in nested `subagents/agent-*.jsonl` 
 
 ### 4. `/goal-history` command
 
-List past goals for the current session (complete / abandoned / orphaned) with duration, tokens spent, and outcome. Backed by the existing `goals` table — just a new read path.
+List the current session's tracked goal by default, or every tracked session with `--all`, including status, paused reason, worker tokens, subagent tokens, time, and continuation budget. Backed by the existing `goals` table — just a read path.
 
 ### 5. `-p` and Remote Control mode validation
 
-Anthropic's native `/goal` works in `claude -p` (one-shot) and Remote Control. Our hooks fire in interactive mode but we've never validated the headless / API-driven paths. Phase 2 includes a Codex smoke per mode.
+Anthropic's native `/goal` works in `claude -p` (one-shot) and Remote Control. Phase 2 validated this plugin's `-p` path end-to-end, including evaluator dispatch, `goal_completed_by_evaluator`, per-subagent token attribution, and F5 post-completion accounting. Remote Control is available in `claude --help`, but the dedicated interactive Remote Control smoke is deferred to v0.1.1 hardening.
 
 ## v0.2+ — speculative
 
@@ -73,6 +71,6 @@ Anthropic's native `/goal` works in `claude -p` (one-shot) and Remote Control. O
 
 | Tag | Date | Headline |
 |---|---|---|
-| v0.1.0 | TBD (pending audits + soak) | Initial public beta — goal lifecycle commands, budgets, `/compact` recovery, SQLite persistence, F5 final-turn accounting, evaluator subagent, per-subagent token attribution, `/goal-history`, `-p`/Remote Control validated |
+| v0.1.0 | TBD (pending final audit + soak) | Initial public beta — goal lifecycle commands, budgets, `/compact` recovery, SQLite persistence, F5 final-turn accounting, evaluator subagent, per-subagent token attribution, `/goal-history`, and `-p` validation |
 | v0.1.x | rolling | Bugfixes from outside-user feedback |
 | v0.2.0 | speculative | Multi-objective goals, cost preview, web overlay, marketplace publish |

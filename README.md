@@ -9,7 +9,7 @@ Claude Code v2.1.139+ ships a native `/goal` command (session-scoped Stop hook +
 | | Built-in `/goal` (CC 2.1.139+) | `claude-goal` (this plugin) |
 |---|---|---|
 | Set objective + autonomous continuation | yes | yes |
-| Live elapsed/turns/tokens overlay | yes (built-in UI) | via statusline |
+| Live status/tokens indicator | yes (built-in UI) | via statusline |
 | Token budget enforcement | phrase it in the condition | `--budget N`, deterministic |
 | Turn cap | phrase it in the condition | 50 default, `--add-continuations N` to extend |
 | Wall-clock cap | phrase it in the condition | 4h default, `--add-hours N` to extend |
@@ -40,7 +40,7 @@ tar -xzf claude-goal-v0.1.0.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 
-The tarball ships the prebuilt MCP `dist/` plus pruned production runtime dependencies under `mcp/goal-server/node_modules`, so no package-manager install step is needed on the target machine beyond a Node 22 runtime to execute the server.
+The tarball ships the prebuilt MCP `dist/`, pruned production runtime dependencies under `mcp/goal-server/node_modules`, and the release license/notes, so no package-manager install step is needed on the target machine beyond a Node 22 runtime to execute the server.
 
 **Start a goal:**
 
@@ -89,11 +89,11 @@ Claude pauses automatically when worker plus subagent token usage reaches the bu
 
 5. **State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, continuation budget, wall-clock usage, and a full audit event log in `goal_events`.
 
-6. **MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, and `update_goal`. Slash-command skills invoke `create_goal`; the worker or evaluator invokes `update_goal` on completion; all other lifecycle operations go through `scripts/goal-cli.sh`.
+6. **MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, and `update_goal`. Slash-command skills invoke `create_goal`; the worker invokes `update_goal` on completion after either self-audit or evaluator confirmation; all other lifecycle operations go through `scripts/goal-cli.sh`.
 
 ## Optional statusline
 
-Add a live goal status indicator to the Claude Code status bar. Once `statusline/status.sh` is present (Phase 6.3), add this to `~/.claude/settings.json`:
+Add a live goal status indicator to the Claude Code status bar by adding this to `~/.claude/settings.json`:
 
 ```json
 {
@@ -106,19 +106,16 @@ Add a live goal status indicator to the Claude Code status bar. Once `statusline
 
 The script queries the active session's goal from SQLite and prints one of:
 
-- `Pursuing goal (12K / 50K)` — active, with budget
-- `Pursuing goal (8K)` — active, no budget
-- `Goal paused (user)` — paused by user
-- `Goal unmet (budget exhausted)` — budget_limited
-- `Goal achieved` — complete
-
-> Note: `statusline/status.sh` is not yet present. It will be added in Phase 6.3.
+- `◎ goal active (12K / 50K)` — active, with budget
+- `◎ goal active (8K)` — active, no budget
+- `◎ goal paused (user)` — paused by user
+- `◎ goal unmet (budget exhausted)` — budget_limited
+- `◎ goal achieved` — complete
 
 ## Known limitations
 
 - **macOS / Linux / WSL only.** The hooks are bash scripts. Native Windows (cmd.exe / Git Bash without a proper bash layer) triggers a fail-fast guard in `stop.sh`. WSL is best-effort and untested.
-- **`/clear` orphans the active goal.** Claude Code's `/clear` creates a new session ID, leaving the old goal's state in SQLite with no session to drive it. Use `/goal-abandon` before clearing. `/goal-cleanup` (Phase 6.4) will list and delete orphans.
-- **Subagent token usage is partially counted.** The `PostToolBatch` hook fires on the parent session for subagent tool calls, so subagent activity is accounted for via the parent transcript — same as Codex parity. Dedicated per-subagent cursors are Phase 2 v0.1.0 work.
+- **`/clear` orphans the active goal.** Claude Code's `/clear` creates a new session ID, leaving the old goal's state in SQLite with no session to drive it. Use `/goal-abandon` before clearing, or `/goal-cleanup --list` / `--delete` to surface and reap orphaned rows.
 - **Final-turn accounting is bounded.** F5 catches late completion-turn transcript flushes with five 100ms retries. If Claude Code flushes completion usage after that window, a tiny residual undercount is still possible; the retry is intentionally bounded so Stop hooks do not hang.
 - **Auto mode classifier may block `update_goal`.** Claude Code's Auto mode runs a classifier that can reject tool calls from skills if the objective looks like placeholder text. Use concrete, achievable objectives (e.g. `"add a --verbose flag to the CLI"`, not `"do the task"`).
 - **Plugin upgrade lifecycle is undocumented.** After updating the plugin files, run `claude restart` to reload the MCP server. Hot-reload behavior is not guaranteed.
@@ -136,19 +133,19 @@ The script queries the active session's goal from SQLite and prints one of:
 
 - **Design spec:** `docs/superpowers/specs/2026-05-09-claude-goal-design.md`
 - **Implementation plan:** `docs/superpowers/plans/2026-05-09-claude-goal-implementation.md`
-- **Hook tests:** `tests/` — 79 bats test cases across 12 `.bats` files
-- **MCP tests:** `mcp/goal-server/test/` — 32 Vitest test cases across 4 test files
+- **Hook tests:** `tests/` — bats coverage for hooks, skills, integration loops, release packaging, and regression probes
+- **MCP tests:** `mcp/goal-server/test/` — Vitest coverage for the MCP server, migrations, tools, token math, and fixtures
 
 Run hook tests:
 
 ```bash
-bats tests/
+bats $(rg --files -g '*.bats' tests | sort)
 ```
 
 Run MCP tests:
 
 ```bash
-cd mcp/goal-server && pnpm test
+npm --prefix mcp/goal-server test
 ```
 
 ## Acknowledgments

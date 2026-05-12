@@ -124,7 +124,7 @@ case "$SOURCE" in
     # session_id, which has no goal yet → the ROW lookup above already exited.
     # If we somehow arrive here (same session_id still active at /clear time),
     # that is unexpected. Log it but do NOT modify the goal. The orphan row will
-    # be cleaned up by /goal-cleanup (Phase 6.4).
+    # be cleaned up by /goal-cleanup.
     # ---------------------------------------------------------------------------
     log_info "session-start: source=clear — orphan policy; not touching DB (session_id=$SESSION_ID)"
     ;;

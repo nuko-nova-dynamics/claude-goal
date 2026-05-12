@@ -23,10 +23,11 @@ if [[ -z "$SID" && -f "$PLUGIN_ROOT/.runtime-session-id" ]]; then
 fi
 
 [[ -z "$SID" || ! -f "$DB_PATH" ]] && exit 0
+SID_ESC=${SID//\'/\'\'}
 
 # Use sqlite3 -json output and jq for robust parsing per Phase 4.6 lesson
 ROW=$(sqlite3 -bail -cmd ".timeout 5000" -json "$DB_PATH" \
-  "SELECT status, paused_reason, tokens_used, token_budget, continuations_remaining FROM goals WHERE session_id = '$SID';" 2>/dev/null || echo "")
+  "SELECT status, paused_reason, tokens_used, token_budget, continuations_remaining FROM goals WHERE session_id = '$SID_ESC';" 2>/dev/null || echo "")
 [[ -z "$ROW" || "$ROW" == "[]" ]] && exit 0
 
 STATUS=$(echo "$ROW" | jq -r '.[0].status')

@@ -21,7 +21,7 @@ trap 'rm -rf "$STAGE"' EXIT
 # Keep those dependencies in the tarball so a clean target profile does not
 # need the source repo or a package-manager install step.
 mkdir -p "$STAGE/mcp/goal-server"
-cp -R .claude-plugin .mcp.json agents hooks scripts skills prompts statusline README.md docs "$STAGE/"
+cp -R .claude-plugin .mcp.json agents hooks scripts skills prompts statusline README.md RELEASE_NOTES.md LICENSE docs "$STAGE/"
 cp mcp/goal-server/package.json mcp/goal-server/package-lock.json "$STAGE/mcp/goal-server/"
 cp -R mcp/goal-server/dist mcp/goal-server/node_modules "$STAGE/mcp/goal-server/"
 
@@ -36,6 +36,6 @@ tar \
     -czf "$OUT" \
     -C "$STAGE" \
     .claude-plugin .mcp.json agents hooks scripts skills prompts statusline \
-    mcp README.md docs
+    mcp README.md RELEASE_NOTES.md LICENSE docs
 
 echo "built $OUT ($(du -h "$OUT" | cut -f1), $(tar -tzf "$OUT" | wc -l | tr -d ' ') entries)"

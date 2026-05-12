@@ -7,5 +7,5 @@ disable-model-invocation: true
 The user invoked /goal-doctor. Run this command via the Bash tool and report only its output. Do not call any other tools.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/goal-cli.sh doctor
+"${CLAUDE_PLUGIN_ROOT}/scripts/goal-cli.sh" doctor
 ```

@@ -1,7 +1,7 @@
 {
   "name": "claude-goal",
   "version": "0.1.0",
-  "description": "Codex-style autonomous goal loop. /goal \"objective\" runs the agent until the model passes its own completion audit.",
+  "description": "Codex-style autonomous goal loop. /goal-start \"objective\" runs the agent until the model passes its own completion audit.",
   "author": { "name": "Nuko Nova Dynamics" },
   "mcpServers": "./.mcp.json"
 }

@@ -43,7 +43,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "create_goal",
-      description: "Create a new goal. Only call this when the user explicitly invokes /goal — do not infer goals from ordinary tasks. Fails if a goal already exists in 'active' or 'budget_limited' status; replaces any 'complete', 'paused', or 'abandoned' prior goal.",
+      description: "Create a new goal. Only call this when the user explicitly invokes /goal-start — do not infer goals from ordinary tasks. Fails if a goal already exists in 'active' or 'budget_limited' status; replaces any 'complete', 'paused', or 'abandoned' prior goal.",
       inputSchema: {
         type: "object",
         required: envSessionId ? ["objective"] : ["session_id", "objective"],

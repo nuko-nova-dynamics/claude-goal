@@ -15,4 +15,6 @@ setup() {
   [[ "$ENTRIES" == *"mcp/goal-server/node_modules/@modelcontextprotocol/sdk/package.json"* ]]
   [[ "$ENTRIES" == *"mcp/goal-server/node_modules/better-sqlite3/package.json"* ]]
   [[ "$ENTRIES" == *"agents/goal-evaluator.md"* ]]
+  [[ "$ENTRIES" == *"LICENSE"* ]]
+  [[ "$ENTRIES" == *"RELEASE_NOTES.md"* ]]
 }

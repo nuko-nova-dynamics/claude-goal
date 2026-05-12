@@ -8,7 +8,7 @@ body:
       label: What happened?
       description: Short description of the behavior you saw vs. what you expected.
       placeholder: |
-        I ran `/goal "..."` and ...
+        I ran `/goal-start "..."` and ...
         I expected ...
         Instead ...
     validations:
@@ -18,7 +18,7 @@ body:
     id: reproduction
     attributes:
       label: Reproduction
-      description: The exact `/goal` command you ran (redact anything sensitive) and any preceding state.
+      description: The exact `/goal-start` or `/goal-*` command you ran (redact anything sensitive) and any preceding state.
       render: text
     validations:
       required: true
@@ -68,7 +68,7 @@ body:
         Optional but very helpful. Run:
         ```
         sqlite3 ~/.claude/plugins/data/claude-goal*/goals.db \
-          "SELECT session_id, objective, status, paused_reason, tokens_used, token_budget, continuations_remaining, accounting_uncertain FROM goals;"
+          "SELECT session_id, objective, status, paused_reason, tokens_used, subagent_tokens, token_budget, continuations_remaining, accounting_uncertain FROM goals;"
         ```
         (Or whatever path `CLAUDE_PLUGIN_DATA` resolves to on your machine.)
       render: text

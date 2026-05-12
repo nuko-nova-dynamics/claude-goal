@@ -10,28 +10,30 @@ This is a **public beta**. The happy path is real-Claude-validated end-to-end ac
 
 ### Commands
 
-`/goal "objective" [--budget N]` · `/goal-status` · `/goal-pause` · `/goal-resume` · `/goal-abandon` · `/goal-extend --add-continuations N | --add-hours N` · `/goal-reconcile --accept-reset` · `/goal-doctor` · `/goal-cleanup --list | --delete [--older-than HOURS]`
+`/goal-start "objective" [--budget N]` · `/goal-status` · `/goal-pause` · `/goal-resume` · `/goal-abandon` (`/goal-stop` alias) · `/goal-extend --add-continuations N | --add-hours N` · `/goal-reconcile --accept-reset` · `/goal-doctor` · `/goal-history [--all] [--format=json]` · `/goal-cleanup --list | --delete [--older-than HOURS]`
 
 ### How it works
 
 1. **Stop hook** injects a continuation prompt via `{"decision":"block","reason":"..."}` after every turn, driving the model to self-iterate.
-2. **PostToolBatch hook** sums `input_tokens + cache_creation_input_tokens + output_tokens` from transcript JSONL usage fields. Cache-read excluded.
-3. **MCP server** (`mcp/goal-server`) exposes `create_goal`, `get_goal`, `update_goal`. Schema in SQLite with WAL mode, downgrade-protection, optimistic-version concurrency guard.
-4. **Completion detection** scans the latest assistant message for a `tool_use` call of `update_goal` with `status: "complete"`. The Stop hook stays silent when detected.
-5. **Budget / cap enforcement** transitions goals to `budget_limited`, `paused` (`continuation_cap`, `wall_clock_cap`), or `degraded` on catch-all errors.
+2. **PostToolBatch hook** sums `input_tokens + cache_creation_input_tokens + output_tokens` from transcript JSONL usage fields. Cache-read is excluded. Parent-worker turns write `tokens_used`; subagent turns write `subagent_tokens` through per-agent cursors.
+3. **MCP server** (`mcp/goal-server`) exposes `create_goal`, `get_goal`, `update_goal`. Schema in SQLite with WAL mode, downgrade-protection, optimistic-version concurrency guard, and v2 subagent cursor migration.
+4. **Completion detection** uses a dual path: worker self-audit can call `update_goal`, and the worker is instructed to dispatch the plugin subagent `claude-goal:goal-evaluator` before marking complete. Completion events distinguish `goal_completed_by_self_update` from `goal_completed_by_evaluator`.
+5. **Budget / cap enforcement** transitions goals to `budget_limited`, `paused` (`continuation_cap`, `wall_clock_cap`), or `degraded` on catch-all errors. Budget math uses worker + subagent tokens.
 
 ### Empirically verified
 
 - 20 Phase-0 probes resolved (18 pass · 1 skip · 1 unclear)
 - 5 real-Claude acceptance scenarios via Codex computer-use smoke
+- F5 final-turn token accounting after completion
+- Evaluator subagent dispatch and per-subagent token attribution under `claude -p`
 - Stop hook stdin contract (no `tool_calls` field — completion read from transcript JSONL)
-- v1→v2 schema migration probe (P15)
+- v1→v2 schema migration probe and transactional v2 migration tests
 - Cold-start install from fresh clone and from release tarball
 - macOS, Linux
 
 ### Tests
 
-102 bats + 48 Vitest = **150 green**. GitHub Actions CI on Ubuntu.
+127 bats + 59 Vitest = **186 green**. GitHub Actions CI on Ubuntu.
 
 ## Install
 
@@ -43,7 +45,7 @@ tar -xzf claude-goal-v0.1.0.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 
-The tarball ships the prebuilt MCP `dist/` plus pruned production dependencies under `mcp/goal-server/node_modules/`. No package-manager install needed on the target machine beyond a Node 22 runtime.
+The tarball ships the prebuilt MCP `dist/`, pruned production dependencies under `mcp/goal-server/node_modules/`, `LICENSE`, and `RELEASE_NOTES.md`. No package-manager install needed on the target machine beyond a Node 22 runtime.
 
 ### From git (development)
 
@@ -56,11 +58,11 @@ claude --plugin-dir "$PWD"
 
 ## Known limitations
 
-- **Final turn's tokens at completion are undercounted.** Token accounting catchup runs at the start of the Stop hook, before `update_goal` is detected. Tracked as F5, deferred to v0.2.
-- **Subagent token usage is partially counted.** PostToolBatch fires on the parent for subagent tool calls, so subagent activity rolls into parent. Per-subagent cursors deferred to v0.2.
 - **macOS / Linux / WSL only.** Native Windows triggers a fail-fast guard in `stop.sh`. WSL is best-effort.
 - **Auto mode classifier may block `update_goal`.** Use concrete, achievable objectives.
 - **`/clear` orphans the active goal.** New session ID leaves the old goal as an orphan row. Use `/goal-cleanup --list` / `--delete` to surface and reap.
+- **Final-turn accounting is bounded.** F5 catches late completion-turn transcript flushes with five 100ms retries. If Claude Code flushes completion usage after that window, a tiny residual undercount is still possible.
+- **Remote Control dedicated smoke is deferred.** The `-p` headless path is validated; Remote Control advertises the same hook surface but remains an interactive v0.1.1 hardening smoke.
 - **Plugin upgrade lifecycle.** Run `claude restart` after updating plugin files; hot-reload is not guaranteed.
 
 ## Acknowledgments
