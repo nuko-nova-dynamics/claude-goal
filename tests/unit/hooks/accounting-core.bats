@@ -4,7 +4,7 @@ setup() {
   TMPDIR_TEST=$(mktemp -d)
   export DB_PATH="$TMPDIR_TEST/g.db"
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-  sqlite3 "$DB_PATH" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$DB_PATH"
   # Cross-platform milliseconds
   NOW_MS=$(python3 -c "import time; print(int(time.time()*1000))")
   sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, resume_at_ms, created_at_ms, updated_at_ms)
@@ -116,6 +116,37 @@ EOF
 @test "advance() triggers budget_limited transition" {
   sqlite3 "$DB_PATH" "UPDATE goals SET token_budget = 100 WHERE session_id='s1';"
   account_advance_inline "s1" "$TRANSCRIPT"
+  STATUS=$(sqlite3 "$DB_PATH" "SELECT status FROM goals WHERE session_id='s1';")
+  [ "$STATUS" = "budget_limited" ]
+}
+
+@test "advance() with agent_id uses subagent_tokens and separate cursor" {
+  AGENT_TRANSCRIPT="$TMPDIR_TEST/agent.jsonl"
+  cat > "$AGENT_TRANSCRIPT" <<'EOF'
+{"type":"assistant","uuid":"a1","message":{"usage":{"input_tokens":8,"output_tokens":2}}}
+EOF
+
+  account_advance_inline "s1" "$AGENT_TRANSCRIPT" "agent-1"
+
+  ROW=$(sqlite3 "$DB_PATH" "SELECT tokens_used || '|' || subagent_tokens || '|' || last_accounted_byte_offset FROM goals WHERE session_id='s1';")
+  [ "$ROW" = "0|10|0" ]
+
+  echo '{"type":"assistant","uuid":"a2","message":{"usage":{"input_tokens":5,"output_tokens":1}}}' >> "$AGENT_TRANSCRIPT"
+  account_advance_inline "s1" "$AGENT_TRANSCRIPT" "agent-1"
+
+  SUBAGENT_TOKENS=$(sqlite3 "$DB_PATH" "SELECT subagent_tokens FROM goals WHERE session_id='s1';")
+  [ "$SUBAGENT_TOKENS" = "16" ]
+}
+
+@test "advance() budget includes parent and subagent tokens" {
+  sqlite3 "$DB_PATH" "UPDATE goals SET token_budget = 20, tokens_used = 15 WHERE session_id='s1';"
+  AGENT_TRANSCRIPT="$TMPDIR_TEST/agent-budget.jsonl"
+  cat > "$AGENT_TRANSCRIPT" <<'EOF'
+{"type":"assistant","uuid":"a1","message":{"usage":{"input_tokens":4,"output_tokens":2}}}
+EOF
+
+  account_advance_inline "s1" "$AGENT_TRANSCRIPT" "agent-1"
+
   STATUS=$(sqlite3 "$DB_PATH" "SELECT status FROM goals WHERE session_id='s1';")
   [ "$STATUS" = "budget_limited" ]
 }

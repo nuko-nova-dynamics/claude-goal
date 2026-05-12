@@ -146,6 +146,7 @@ ROW_JSON=$(sqlite3 -bail -json -cmd ".timeout 5000" "$DB_PATH" "
     status,
     token_budget,
     tokens_used,
+    subagent_tokens,
     time_used_seconds,
     COALESCE(resume_at_ms, 0) AS resume_at_ms,
     continuations_remaining,
@@ -173,6 +174,8 @@ OBJECTIVE=$(echo "$ROW_JSON" | jq -r '.[0].objective // ""')
 STATUS=$(echo "$ROW_JSON" | jq -r '.[0].status // ""')
 TOKEN_BUDGET=$(echo "$ROW_JSON" | jq -r '.[0].token_budget // ""')
 TOKENS_USED=$(echo "$ROW_JSON" | jq -r '.[0].tokens_used // 0')
+SUBAGENT_TOKENS=$(echo "$ROW_JSON" | jq -r '.[0].subagent_tokens // 0')
+TOTAL_TOKENS_USED=$(( TOKENS_USED + SUBAGENT_TOKENS ))
 TIME_USED=$(echo "$ROW_JSON" | jq -r '.[0].time_used_seconds // 0')
 RESUME_AT=$(echo "$ROW_JSON" | jq -r '.[0].resume_at_ms // 0')
 CONT_REM=$(echo "$ROW_JSON" | jq -r '.[0].continuations_remaining // 0')
@@ -237,7 +240,9 @@ case "$STATUS" in
   budget_limited)
     if [[ "$BL_REPORTED" = "0" ]]; then
       export OBJECTIVE_RAW="$OBJECTIVE"
-      export TOKENS_USED="$TOKENS_USED"
+      export WORKER_TOKENS_USED="$TOKENS_USED"
+      export SUBAGENT_TOKENS
+      export TOKENS_USED="$TOTAL_TOKENS_USED"
       export TOKEN_BUDGET="${TOKEN_BUDGET:-none}"
       export REMAINING_TOKENS="0"
       export TIME_USED_SECONDS="$TIME_USED"
@@ -378,7 +383,7 @@ fi
 REMAINING="unbounded"
 WARNING=""
 if [[ -n "$TOKEN_BUDGET" ]]; then
-  REM=$(( TOKEN_BUDGET - TOKENS_USED ))
+  REM=$(( TOKEN_BUDGET - TOTAL_TOKENS_USED ))
   (( REM < 0 )) && REM=0
   REMAINING="$REM"
   PCT=$(( REM * 100 / TOKEN_BUDGET ))
@@ -391,7 +396,9 @@ fi
 
 export OBJECTIVE_RAW="$OBJECTIVE"
 export SESSION_ID
-export TOKENS_USED
+export WORKER_TOKENS_USED="$TOKENS_USED"
+export SUBAGENT_TOKENS
+export TOKENS_USED="$TOTAL_TOKENS_USED"
 export TIME_USED_SECONDS="$TOTAL_WALL"
 export REMAINING_TOKENS="$REMAINING"
 export BUDGET_WARNING="$WARNING"

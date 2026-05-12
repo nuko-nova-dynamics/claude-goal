@@ -16,7 +16,7 @@ setup() {
   fi
   printf '%s' "$TMPDIR_TEST" > "$REPO_ROOT/.runtime-data-dir"
 
-  sqlite3 "$DB_PATH" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql" >/dev/null 2>&1
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$DB_PATH" >/dev/null 2>&1
   # Cross-platform milliseconds (macOS lacks date +%s%3N)
   NOW=$(python3 -c "import time; print(int(time.time()*1000))")
   sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, tokens_used, resume_at_ms, created_at_ms, updated_at_ms)

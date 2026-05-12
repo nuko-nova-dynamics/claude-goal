@@ -12,7 +12,7 @@ setup() {
   # Isolate from real marker file
   [[ -f "$REPO_ROOT/.runtime-data-dir" ]] && cp "$REPO_ROOT/.runtime-data-dir" "$REPO_ROOT/.runtime-data-dir.bak"
   printf '%s' "$TMPDIR_TEST" > "$REPO_ROOT/.runtime-data-dir"
-  sqlite3 "$DB_PATH" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$DB_PATH"
   NOW=$(python3 -c "import time; print(int(time.time()*1000))")
   STALE=$(( NOW - (48 * 3600 * 1000) ))
   sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES ('stale-sess', 'g-stale', 'old goal', 'active', $STALE, $STALE);"

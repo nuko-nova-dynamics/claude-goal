@@ -13,7 +13,7 @@ setup() {
   export REPO_ROOT
 
   # Bootstrap schema
-  sqlite3 "$DB_PATH" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$DB_PATH"
 
   NOW=$(python3 -c "import time; print(int(time.time()*1000))")
   RESUME_AT=$((NOW - 5000))

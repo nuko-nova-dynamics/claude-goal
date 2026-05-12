@@ -4,7 +4,7 @@ setup() {
   TMPDIR_TEST=$(mktemp -d)
   export DB_PATH="$TMPDIR_TEST/g.db"
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-  sqlite3 "$DB_PATH" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$DB_PATH"
   source "$REPO_ROOT/scripts/lib/sqlite-retry.sh"
   source "$REPO_ROOT/scripts/lib/lease.sh"
 }

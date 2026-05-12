@@ -39,13 +39,13 @@ Implementation:
 
 The completion turn's tokens are now captured by a bounded retry loop after `detect_update_goal` returns true, and also when `update_goal` has already transitioned the row to `complete` before Stop reads the final transcript bytes. Five retries at 100ms intervals re-run `account_advance_inline` to catch transcripts that flush after the start-of-hook accounting pass. Records a `final_turn_accounted` event when the retry advances the byte offset.
 
-## v0.1.0 — phase 2 pending
+## v0.1.0 — phase 2 in progress
 
 These are also v0.1.0 work, queued behind the audit on phase 1.
 
 ### 3. Per-subagent token attribution
 
-Today, subagent tool calls fire `PostToolBatch` on the parent session, so subagent activity rolls into the parent's `tokens_used`. CC 2.1.139 added `x-claude-code-agent-id` / `x-claude-code-parent-agent-id` headers and the `agent_id` / `parent_agent_id` attributes on OTEL spans. Phase 2 reads these from the hook payload and splits accounting into a `subagent_tokens` column on `goals`.
+Claude Code stores subagent assistant usage in nested `subagents/agent-*.jsonl` transcripts. Phase 2 reads `agent_id` from `PostToolBatch`, accounts those nested transcripts with per-agent cursors, and rolls the total into `goals.subagent_tokens` while keeping parent-worker usage in `tokens_used`.
 
 ### 4. `/goal-history` command
 

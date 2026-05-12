@@ -12,6 +12,7 @@ export interface Goal {
   paused_reason: PausedReason | null;
   token_budget: number | null;
   tokens_used: number;
+  subagent_tokens: number;
   time_used_seconds: number;
   resume_at_ms: number | null;
   last_accounted_byte_offset: number;
@@ -68,13 +69,14 @@ export class GoalsRepo {
         this.db.prepare(`
           UPDATE goals SET
             goal_id = ?, objective = ?, status = 'active', paused_reason = NULL,
-            token_budget = ?, tokens_used = 0, time_used_seconds = 0,
+            token_budget = ?, tokens_used = 0, subagent_tokens = 0, time_used_seconds = 0,
             resume_at_ms = ?, last_accounted_byte_offset = 0, last_accounted_uuid = NULL,
             accounting_uncertain = 0, last_continuation_at_ms = NULL,
             continuations_remaining = 50, budget_limit_reported = 0,
             version = version + 1, created_at_ms = ?, updated_at_ms = ?
           WHERE session_id = ?
         `).run(goal_id, input.objective, input.token_budget, now, now, now, input.session_id);
+        this.db.prepare("DELETE FROM subagent_token_cursors WHERE session_id = ?").run(input.session_id);
 
         this.recordEvent(input.session_id, goal_id, "goal_replaced", null, "active",
           { prev_status: existing.status, prev_goal_id: existing.goal_id });

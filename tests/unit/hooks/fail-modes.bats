@@ -17,7 +17,7 @@ setup() {
   printf '%s' "$TMPDIR_TEST" > "$REPO_ROOT/.runtime-data-dir"
 
   # Create schema at the path the scripts will resolve to: $TMPDIR_TEST/goals.db
-  sqlite3 "$DB_PATH" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql" >/dev/null 2>&1
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$DB_PATH" >/dev/null 2>&1
 }
 
 teardown() {

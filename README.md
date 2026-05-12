@@ -56,14 +56,14 @@ Expected behavior: Claude confirms the goal, begins working, and continues acros
 /goal-start "refactor the auth module to use async/await" --budget 50000
 ```
 
-Claude pauses automatically when `tokens_used` reaches the budget, leaving the goal in `budget_limited` status. Use `/goal-extend` to add more budget.
+Claude pauses automatically when worker plus subagent token usage reaches the budget, leaving the goal in `budget_limited` status. Use `/goal-extend` to add more budget.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `/goal-start "objective" [--budget N]` | Start a new autonomous goal. Replaces any prior completed/abandoned goal for this session. |
-| `/goal-status` | Show current goal, status, tokens used vs budget, continuations remaining, and any warnings. |
+| `/goal-status` | Show current goal, status, worker tokens used vs budget, subagent tokens, continuations remaining, and any warnings. |
 | `/goal-pause` | Pause the goal immediately (user-paused). Claude stops self-driving until you resume. |
 | `/goal-resume` | Resume a user-paused goal. |
 | `/goal-abandon` (alias `/goal-stop`) | Abandon the current goal permanently and stop the auto-continuation loop. |
@@ -79,13 +79,13 @@ Claude pauses automatically when `tokens_used` reaches the budget, leaving the g
 
 1. **Stop hook — continuation injection.** After every turn, `scripts/stop.sh` fires. If a goal is `active`, the hook emits `{"decision":"block","reason":"<continuation prompt>"}`, which causes Claude Code to feed the prompt back to the model for the next turn. The continuation prompt (adapted from Codex's `continuation.md`) reminds the model of the objective and asks it to either keep working or call `update_goal` when done.
 
-2. **Token accounting.** `scripts/post-tool-batch.sh` fires after every tool batch. It reads the session transcript JSONL, finds the assistant messages since the last recorded cursor, and sums `input_tokens + output_tokens` from each message's usage metadata. Accumulated counts are written to SQLite.
+2. **Token accounting.** `scripts/post-tool-batch.sh` fires after every tool batch. Parent-worker turns read the session transcript JSONL, find assistant messages since the last recorded cursor, and sum `input_tokens + cache_creation_input_tokens + output_tokens`. Subagent turns use `agent_id` to account the nested subagent transcript separately. Parent-worker counts are written to `tokens_used`; subagent counts are written to `subagent_tokens`.
 
 3. **Completion detection — dual path.** Completion can fire from either:
    - **Worker self-audit:** the worker calls `update_goal` with `status: "complete"`. The Stop hook also scans recent transcript messages for that tool call so it can stay silent instead of injecting another continuation prompt. Event recorded: `goal_completed_by_self_update`.
    - **Evaluator subagent:** before marking a goal complete, the continuation prompt tells the worker to dispatch `claude-goal:goal-evaluator`. The fresh-context subagent reads the active goal's objective from the DB, inspects recent transcript state, and uses tools to verify the objective against real state. If it returns `{"verdict":"complete"}`, the worker calls `update_goal` with `completed_by: "evaluator"`. Distinct event: `goal_completed_by_evaluator`. The worker self-audit path stays as the always-available fallback if the subagent is unavailable or explicitly skipped.
 
-4. **Budget / cap enforcement.** At the start of each Stop hook run, the hook checks `tokens_used >= token_budget`, `continuations_remaining <= 0`, and elapsed wall-clock time. Any breach transitions the goal to `paused` with the appropriate `paused_reason` before checking for completion.
+4. **Budget / cap enforcement.** At the start of each Stop hook run, the hook checks `(tokens_used + subagent_tokens) >= token_budget`, `continuations_remaining <= 0`, and elapsed wall-clock time. Any breach transitions the goal to `paused` with the appropriate `paused_reason` before checking for completion.
 
 5. **State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, continuation budget, wall-clock usage, and a full audit event log in `goal_events`.
 

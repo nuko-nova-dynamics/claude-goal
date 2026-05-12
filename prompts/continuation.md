@@ -8,7 +8,7 @@ ${OBJECTIVE}
 
 Budget:
 - Time spent pursuing goal: ${TIME_USED_SECONDS} seconds
-- Tokens used: ${TOKENS_USED}
+- Tokens used: ${TOKENS_USED} (worker: ${WORKER_TOKENS_USED}, subagents: ${SUBAGENT_TOKENS})
 - Token budget: ${TOKEN_BUDGET}
 - Tokens remaining: ${REMAINING_TOKENS}
 ${BUDGET_WARNING}

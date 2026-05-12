@@ -21,6 +21,8 @@ export DB_PATH="$PLUGIN_DATA/goals.db"
 INPUT=$(cat 2>/dev/null || echo "")
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""' 2>/dev/null || echo "")
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // ""' 2>/dev/null || echo "")
+AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // ""' 2>/dev/null || echo "")
+AGENT_TRANSCRIPT=$(echo "$INPUT" | jq -r '.agent_transcript_path // ""' 2>/dev/null || echo "")
 
 if [[ -z "$SESSION_ID" || -z "$TRANSCRIPT" ]]; then
   log_error "post-tool-batch: missing session_id or transcript_path"
@@ -34,8 +36,25 @@ STATUS=$(sql_retry "SELECT status FROM goals WHERE session_id = '$SESSION_ID_ESC
 [[ -z "$STATUS" ]] && exit 0
 [[ "$STATUS" != "active" && "$STATUS" != "budget_limited" ]] && exit 0
 
-# Account inline (single-shot transaction within the helper)
-account_advance_inline "$SESSION_ID" "$TRANSCRIPT" || log_error "post-tool-batch: accounting failed"
+# Account inline (single-shot transaction within the helper). When the hook
+# fires inside a subagent, Claude Code stores that agent's assistant usage in
+# a nested transcript. Prefer the explicit path if present, otherwise derive
+# the current path shape: <parent-session>.jsonl -> <parent-session>/subagents/agent-<id>.jsonl.
+ACCOUNT_TRANSCRIPT="$TRANSCRIPT"
+if [[ -n "$AGENT_ID" ]]; then
+  if [[ -n "$AGENT_TRANSCRIPT" && -r "$AGENT_TRANSCRIPT" ]]; then
+    ACCOUNT_TRANSCRIPT="$AGENT_TRANSCRIPT"
+  else
+    DERIVED_TRANSCRIPT="${TRANSCRIPT%.jsonl}/subagents/agent-${AGENT_ID}.jsonl"
+    if [[ -r "$DERIVED_TRANSCRIPT" ]]; then
+      ACCOUNT_TRANSCRIPT="$DERIVED_TRANSCRIPT"
+    else
+      log_error "post-tool-batch: subagent transcript missing for agent_id=$AGENT_ID; falling back to transcript_path"
+    fi
+  fi
+fi
+
+account_advance_inline "$SESSION_ID" "$ACCOUNT_TRANSCRIPT" "$AGENT_ID" || log_error "post-tool-batch: accounting failed"
 
 log_info "post-tool-batch: accounting completed for session $SESSION_ID"
 exit 0

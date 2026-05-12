@@ -12,7 +12,7 @@ setup() {
   export REPO_ROOT
   CLI="$REPO_ROOT/scripts/goal-cli.sh"
   export CLI
-  sqlite3 "$DB_PATH" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$DB_PATH"
 }
 teardown() { rm -rf "$TMPDIR_TEST"; }
 

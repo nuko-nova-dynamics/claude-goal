@@ -1,10 +1,10 @@
 import Database from "better-sqlite3";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const EXPECTED_VERSION = 1;
+const EXPECTED_VERSION = 2;
 
 export function openDb(path: string): Database.Database {
   const db = new Database(path);
@@ -20,19 +20,38 @@ export function getSchemaVersion(db: Database.Database): number {
 }
 
 export function runMigrations(db: Database.Database): void {
+  const migrationsDir = join(__dirname, "migrations");
+  const migrations = readdirSync(migrationsDir)
+    .map((name) => {
+      const match = name.match(/^(\d{3})_.*\.sql$/);
+      return match ? { version: Number(match[1]), name } : null;
+    })
+    .filter((entry): entry is { version: number; name: string } => entry !== null)
+    .sort((a, b) => a.version - b.version);
+
   const versionTableExists = db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
   ).get();
 
+  let currentVersion = 0;
   if (versionTableExists) {
-    const v = getSchemaVersion(db);
-    if (v > EXPECTED_VERSION) {
-      throw new Error(`db schema version ${v} ahead of plugin (expected ${EXPECTED_VERSION}); please upgrade the plugin`);
+    currentVersion = getSchemaVersion(db);
+    if (currentVersion > EXPECTED_VERSION) {
+      throw new Error(`db schema version ${currentVersion} ahead of plugin (expected ${EXPECTED_VERSION}); please upgrade the plugin`);
     }
-    if (v === EXPECTED_VERSION) return;
+    if (currentVersion === EXPECTED_VERSION) return;
   }
 
-  const sqlPath = join(__dirname, "migrations", "001_initial.sql");
-  const sql = readFileSync(sqlPath, "utf8");
-  db.exec(sql);
+  for (const migration of migrations) {
+    if (migration.version <= currentVersion) continue;
+    if (migration.version > EXPECTED_VERSION) continue;
+    const sql = readFileSync(join(migrationsDir, migration.name), "utf8");
+    db.exec(sql);
+    currentVersion = getSchemaVersion(db);
+  }
+
+  const finalVersion = getSchemaVersion(db);
+  if (finalVersion !== EXPECTED_VERSION) {
+    throw new Error(`db schema version ${finalVersion} after migrations; expected ${EXPECTED_VERSION}`);
+  }
 }

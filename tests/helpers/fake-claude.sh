@@ -156,12 +156,12 @@ fake_claude_tool_use() {
 
 # ---------------------------------------------------------------------------
 # fake_claude_init_db
-#   Create goals.db in $FAKE_DATA_DIR by applying migration 001.
+#   Create goals.db in $FAKE_DATA_DIR by applying all migrations.
 #   Call after fake_claude_init so FAKE_DATA_DIR is set.
 #   Also writes the .runtime-data-dir marker so hooks resolve the correct DB.
 # ---------------------------------------------------------------------------
 fake_claude_init_db() {
-  sqlite3 "$FAKE_DATA_DIR/goals.db" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql" >/dev/null 2>&1
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$FAKE_DATA_DIR/goals.db" >/dev/null 2>&1
   export DB_PATH="$FAKE_DATA_DIR/goals.db"
   # Write the runtime-data-dir marker so hooks prefer FAKE_DATA_DIR over any
   # stale marker left by a previous real session.

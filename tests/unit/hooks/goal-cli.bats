@@ -11,7 +11,7 @@ setup() {
   export REPO_ROOT
   CLI="$REPO_ROOT/scripts/goal-cli.sh"
   export CLI
-  sqlite3 "$DB_PATH" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$DB_PATH"
   # macOS-compatible millisecond timestamp helper
   ms_now() { python3 -c "import time; print(int(time.time()*1000))"; }
 }
@@ -24,13 +24,26 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
 
 @test "status JSON includes remaining_tokens and bool accounting_uncertain" {
   NOW=$(ms_now)
-  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, tokens_used, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'active', 1000, 200, $NOW, $NOW, $NOW);"
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, tokens_used, subagent_tokens, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'active', 1000, 200, 50, $NOW, $NOW, $NOW);"
   run "$CLI" status --format=json
   [ "$status" -eq 0 ]
   REM=$(echo "$output" | jq -r '.remaining_tokens')
   AU=$(echo "$output" | jq -r '.accounting_uncertain')
-  [ "$REM" = "800" ]
+  SUBAGENT=$(echo "$output" | jq -r '.subagent_tokens')
+  TOTAL=$(echo "$output" | jq -r '.total_tokens_used')
+  [ "$REM" = "750" ]
   [ "$AU" = "false" ]
+  [ "$SUBAGENT" = "50" ]
+  [ "$TOTAL" = "250" ]
+}
+
+@test "status text includes subagent tokens" {
+  NOW=$(ms_now)
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, tokens_used, subagent_tokens, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'active', 1000, 200, 50, $NOW, $NOW, $NOW);"
+  run "$CLI" status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Tokens: 200 / 1000 (750 remaining)"* ]]
+  [[ "$output" == *"Subagent tokens: 50"* ]]
 }
 
 @test "pause when no active goal exits 2" {
@@ -111,7 +124,7 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   # Create an alternate data dir with its own DB
   ALT_DATA=$(mktemp -d)
   ALT_DB="$ALT_DATA/goals.db"
-  sqlite3 "$ALT_DB" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$ALT_DB"
 
   # Create a plugin root dir and write the marker pointing to ALT_DATA
   FAKE_ROOT=$(mktemp -d)
@@ -136,11 +149,11 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
 @test "status resolves DB from marker file when CLAUDE_PLUGIN_DATA points elsewhere" {
   RIGHT_DATA=$(mktemp -d)
   RIGHT_DB="$RIGHT_DATA/goals.db"
-  sqlite3 "$RIGHT_DB" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$RIGHT_DB"
 
   WRONG_DATA=$(mktemp -d)
   WRONG_DB="$WRONG_DATA/goals.db"
-  sqlite3 "$WRONG_DB" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$WRONG_DB"
 
   FAKE_ROOT=$(mktemp -d)
   printf '%s' "$RIGHT_DATA" > "$FAKE_ROOT/.runtime-data-dir"
@@ -164,7 +177,7 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
 @test "status resolves DB from marker file when DB_PATH points elsewhere" {
   RIGHT_DATA=$(mktemp -d)
   RIGHT_DB="$RIGHT_DATA/goals.db"
-  sqlite3 "$RIGHT_DB" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$RIGHT_DB"
 
   WRONG_DATA=$(mktemp -d)
   WRONG_DB="$WRONG_DATA/goals.db"
@@ -190,7 +203,7 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
 @test "status resolves DB from script-adjacent marker when CLAUDE_PLUGIN_ROOT is unset" {
   RIGHT_DATA=$(mktemp -d)
   RIGHT_DB="$RIGHT_DATA/goals.db"
-  sqlite3 "$RIGHT_DB" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$RIGHT_DB"
 
   WRONG_DATA=$(mktemp -d)
   WRONG_DB="$WRONG_DATA/goals.db"

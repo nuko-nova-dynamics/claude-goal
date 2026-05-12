@@ -15,17 +15,17 @@ setup() {
   export CLI
   [[ -f "$REPO_ROOT/.runtime-data-dir" ]] && cp "$REPO_ROOT/.runtime-data-dir" "$REPO_ROOT/.runtime-data-dir.bak"
   printf '%s' "$TMPDIR_TEST" > "$REPO_ROOT/.runtime-data-dir"
-  sqlite3 "$DB_PATH" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.sql"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$DB_PATH"
   NOW=$(python3 -c "import time; print(int(time.time()*1000))")
   T_OLD=$((NOW - 30000))
   T_MID=$((NOW - 20000))
   T_NEW=$((NOW - 10000))
-  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, token_budget, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
-    VALUES ('s-old', 'g-old', 'oldest goal', 'complete', NULL, 5000, 10000, 47, 12, $T_OLD, $T_OLD);"
-  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, token_budget, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
-    VALUES ('s-mid', 'g-mid', 'middle goal', 'abandoned', 'user', 2000, NULL, 49, 5, $T_MID, $T_MID);"
-  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, token_budget, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
-    VALUES ('s-current', 'g-current', 'current session goal', 'active', NULL, 1000, NULL, 50, 3, $T_NEW, $T_NEW);"
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, subagent_tokens, token_budget, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
+    VALUES ('s-old', 'g-old', 'oldest goal', 'complete', NULL, 5000, 700, 10000, 47, 12, $T_OLD, $T_OLD);"
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, subagent_tokens, token_budget, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
+    VALUES ('s-mid', 'g-mid', 'middle goal', 'abandoned', 'user', 2000, 0, NULL, 49, 5, $T_MID, $T_MID);"
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, subagent_tokens, token_budget, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
+    VALUES ('s-current', 'g-current', 'current session goal', 'active', NULL, 1000, 300, NULL, 50, 3, $T_NEW, $T_NEW);"
 }
 
 teardown() {
@@ -64,6 +64,7 @@ teardown() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e 'type == "array" and length == 3' >/dev/null
   echo "$output" | jq -e '.[0].objective == "current session goal"' >/dev/null
+  echo "$output" | jq -e '.[0].subagent_tokens == 300' >/dev/null
 }
 
 @test "history with no goals in this session prints a hint" {
@@ -81,5 +82,6 @@ teardown() {
   [[ "$output" == *"[complete]"* ]]
   [[ "$output" == *"[abandoned (user)]"* ]]
   [[ "$output" == *"tokens=5000/10000"* ]]
+  [[ "$output" == *"subagent_tokens=700"* ]]
   [[ "$output" == *"tokens=2000"* ]]
 }

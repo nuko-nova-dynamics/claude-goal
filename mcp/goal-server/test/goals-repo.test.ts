@@ -25,6 +25,7 @@ describe("GoalsRepo.create", () => {
     const goal = repo.create({ session_id: "s1", objective: "ship the auth migration", token_budget: 50000 });
     expect(goal.status).toBe("active");
     expect(goal.tokens_used).toBe(0);
+    expect(goal.subagent_tokens).toBe(0);
     expect(goal.continuations_remaining).toBe(50);
     expect(goal.resume_at_ms).toBeGreaterThan(0);
     expect(goal.goal_id).toMatch(/^[0-9a-f-]{36}$/);
@@ -43,6 +44,7 @@ describe("GoalsRepo.create", () => {
     const second = repo.create({ session_id: "s1", objective: "second", token_budget: null });
     expect(second.goal_id).not.toBe(first.goal_id);
     expect(second.status).toBe("active");
+    expect(second.subagent_tokens).toBe(0);
 
     const events = repo.listEvents("s1");
     expect(events.find(e => e.event_type === "goal_replaced")).toBeTruthy();
