@@ -54,6 +54,7 @@ while (( $# > 0 )); do
     --delete) CLEANUP_ACTION="delete"; shift ;;
     --older-than) CLEANUP_HOURS="$2"; CLEANUP_HOURS_EXPLICIT=1; shift 2 ;;
     --older-than=*) CLEANUP_HOURS="${1#*=}"; CLEANUP_HOURS_EXPLICIT=1; shift ;;
+    --all) HISTORY_ALL=1; shift ;;
     *) shift ;;
   esac
 done
@@ -179,6 +180,39 @@ case "$SUBCMD" in
     else
       echo "error: must specify --add-continuations N or --add-hours N" >&2
       exit 1
+    fi
+    ;;
+  history)
+    # List goals tracked by this plugin. The goals table stores one row per
+    # session_id (PRIMARY KEY), so history is naturally cross-session.
+    # Default scope: --current (this session only). Pass --all for every session,
+    # or --session-id <id> for a specific past session.
+    if [[ "${HISTORY_ALL:-0}" = "1" ]]; then
+      WHERE_CLAUSE=""
+    else
+      WHERE_CLAUSE="WHERE session_id = '$SESSION_ID_ESC'"
+    fi
+    ROWS=$(sql -json "
+      SELECT session_id, goal_id, objective, status, paused_reason,
+             tokens_used, token_budget, continuations_remaining,
+             time_used_seconds, created_at_ms, updated_at_ms
+      FROM goals
+      $WHERE_CLAUSE
+      ORDER BY created_at_ms DESC;" 2>/dev/null || echo "[]")
+    if [[ -z "$ROWS" || "$ROWS" = "[]" ]]; then
+      if [[ "$FORMAT" = "json" ]]; then
+        echo "[]"
+      elif [[ "${HISTORY_ALL:-0}" = "1" ]]; then
+        echo "no goals tracked yet"
+      else
+        echo "no goals for this session (try --all for cross-session history)"
+      fi
+      exit 0
+    fi
+    if [[ "$FORMAT" = "json" ]]; then
+      echo "$ROWS"
+    else
+      echo "$ROWS" | jq -r '.[] | "[\(.status)\(if .paused_reason then " (\(.paused_reason))" else "" end)] \(.objective) — tokens=\(.tokens_used)\(if .token_budget then "/\(.token_budget)" else "" end), time=\(.time_used_seconds)s, continuations_remaining=\(.continuations_remaining)\n  goal_id=\(.goal_id) session=\(.session_id) created_at_ms=\(.created_at_ms)"'
     fi
     ;;
   reconcile)
