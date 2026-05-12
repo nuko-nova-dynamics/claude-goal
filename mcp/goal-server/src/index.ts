@@ -57,7 +57,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "update_goal",
-      description: "Update the existing goal. Use this tool only to mark the goal achieved. Set status to 'complete' only when the objective has actually been achieved and no required work remains. Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work. The optional 'completed_by' field distinguishes worker self-audit completion from evaluator-driven completion (the agent-hook evaluator sets it to 'evaluator'; worker model omits it or sends 'self_update').",
+      description: "Update the existing goal. Use this tool only to mark the goal achieved. Set status to 'complete' only when the objective has actually been achieved and no required work remains. Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work. The optional 'completed_by' field distinguishes worker self-audit completion from evaluator-confirmed completion (after the claude-goal:goal-evaluator subagent returns verdict 'complete', send 'evaluator'; worker-only fallback omits it or sends 'self_update').",
       inputSchema: {
         type: "object",
         required: envSessionId ? ["status"] : ["session_id", "status"],

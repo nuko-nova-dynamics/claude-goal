@@ -16,4 +16,8 @@ After the tool returns:
 - If success: briefly confirm the goal is active, restate the objective, mention the token budget if any, then begin work.
 - If error: report the error to the user verbatim.
 
-From now until the goal is marked complete, after every turn the system will inject a continuation prompt. Keep working toward the objective. When you have built and verified a prompt-to-artifact checklist showing every requirement is met, call `update_goal` with `status: "complete"`. Do not mark complete on partial progress.
+From now until the goal is marked complete, after every turn the system will inject a continuation prompt. Keep working toward the objective.
+
+Before marking the goal complete, build and verify a prompt-to-artifact checklist showing every requirement is met. Then dispatch the plugin subagent `claude-goal:goal-evaluator` with the Agent tool (Task is an older alias if Agent is unavailable). Pass the session id, objective, checklist, transcript path if known, and concrete evidence. If it returns `{"verdict":"complete"}`, call `update_goal` with `status: "complete"` and `completed_by: "evaluator"`.
+
+If the evaluator is unavailable, blocked, or explicitly skipped by the user, keep the worker-only fallback: use your own completion audit and call `update_goal` with `status: "complete"` only when the goal is complete. Do not mark complete on partial progress.

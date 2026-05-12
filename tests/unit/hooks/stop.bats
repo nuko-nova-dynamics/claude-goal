@@ -45,6 +45,9 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'"decision":"block"'* ]]
   [[ "$output" == *"ship it"* ]]
+  REASON=$(echo "$output" | jq -r '.reason')
+  [[ "$REASON" == *"claude-goal:goal-evaluator"* ]]
+  [[ "$REASON" == *"session_id: s1"* ]]
   REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals;")
   [ "$REM" = "49" ]
 }

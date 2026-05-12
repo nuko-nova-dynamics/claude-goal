@@ -24,6 +24,23 @@ Before deciding that the goal is achieved, perform a completion audit against th
 - Identify any missing, incomplete, weakly verified, or uncovered requirement.
 - Treat uncertainty as not achieved; do more verification or continue the work.
 
-Do not rely on intent, partial progress, elapsed effort, memory of earlier work, or a plausible final answer as proof of completion. Only mark the goal achieved when the audit shows that the objective has actually been achieved and no required work remains. If any requirement is missing, incomplete, or unverified, keep working instead of marking the goal complete. If the objective is achieved, call update_goal with status "complete" so usage accounting is preserved. Report the final elapsed time, and if the achieved goal has a token budget, report the final consumed token budget to the user after update_goal succeeds.
+Before calling update_goal, dispatch the plugin subagent `claude-goal:goal-evaluator` with the Agent tool (Task is an older alias if Agent is unavailable). Pass it this session id, the objective, the current transcript path if you know it, your checklist, and the concrete evidence you inspected:
+
+```
+session_id: ${SESSION_ID}
+```
+
+If the evaluator returns `{"verdict":"complete"}`, call update_goal with:
+
+```
+{
+  "status": "complete",
+  "completed_by": "evaluator"
+}
+```
+
+If the evaluator returns `incomplete`, keep working on the missing items. If the evaluator is unavailable, blocked, or explicitly skipped by the user, keep the worker-only fallback: rely on your own completion audit and, only if every requirement is actually complete, call update_goal with status "complete" and omit `completed_by` or set it to "self_update".
+
+Do not rely on intent, partial progress, elapsed effort, memory of earlier work, or a plausible final answer as proof of completion. Only mark the goal achieved when the audit shows that the objective has actually been achieved and no required work remains. If any requirement is missing, incomplete, or unverified, keep working instead of marking the goal complete. If the objective is achieved, call update_goal so usage accounting is preserved. Report the final elapsed time, and if the achieved goal has a token budget, report the final consumed token budget to the user after update_goal succeeds.
 
 Do not call update_goal unless the goal is complete. Do not mark a goal complete merely because the budget is nearly exhausted or because you are stopping work.

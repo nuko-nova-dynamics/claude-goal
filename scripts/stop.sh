@@ -390,6 +390,7 @@ Budget warning: ${PCT}% remaining"
 fi
 
 export OBJECTIVE_RAW="$OBJECTIVE"
+export SESSION_ID
 export TOKENS_USED
 export TIME_USED_SECONDS="$TOTAL_WALL"
 export REMAINING_TOKENS="$REMAINING"

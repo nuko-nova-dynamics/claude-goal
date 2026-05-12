@@ -18,7 +18,7 @@ Claude Code v2.1.139+ ships a native `/goal` command (session-scoped Stop hook +
 | Cross-session restart persistence | `--resume` resets counters | SQLite preserves counters |
 | `/clear` handling | auto-removes goal | orphan + `/goal-cleanup` to reap |
 | Preflight self-test | n/a | `/goal-doctor` |
-| Completion judgment | fresh Haiku evaluator per turn (transcript-only) | dual path: worker self-audit via `update_goal` (`completed_by: "self_update"`) AND a separate agent-hook evaluator (`completed_by: "evaluator"`) that can verify with tools — run the test, read the file, check the exit code — instead of trusting optimistic transcript language |
+| Completion judgment | fresh Haiku evaluator per turn (transcript-only) | dual path: worker self-audit via `update_goal` (`completed_by: "self_update"`) AND a plugin subagent evaluator (`completed_by: "evaluator"`) that can verify with tools — run the test, read the file, check the exit code — instead of trusting optimistic transcript language |
 
 The two coexist. Use native `/goal` for quick conditions; use this plugin for production autonomous work where budgets, pauses, and recovery matter.
 
@@ -82,7 +82,7 @@ Claude pauses automatically when `tokens_used` reaches the budget, leaving the g
 
 3. **Completion detection — dual path.** Completion can fire from either:
    - **Worker self-audit:** the worker calls `update_goal` with `status: "complete"`. The Stop hook also scans recent transcript messages for that tool call so it can stay silent instead of injecting another continuation prompt. Event recorded: `goal_completed_by_self_update`.
-   - **Agent-hook evaluator** (parallel agent hook in `hooks/hooks.json`): after every turn, a fresh-context Claude subagent reads the active goal's objective from the DB, inspects the recent transcript, and — critically — uses tools to verify the objective against real state (runs the test, reads the file, checks the exit code). If verifiably complete, it calls `update_goal` with `completed_by: "evaluator"`. Distinct event: `goal_completed_by_evaluator`. This is the architectural separation that beats same-model self-audit's sunk-cost bias. Note: agent hooks are marked experimental in Claude Code's documentation; the worker self-audit path stays as the always-available signal in case the agent-hook contract changes.
+   - **Evaluator subagent:** before marking a goal complete, the continuation prompt tells the worker to dispatch `claude-goal:goal-evaluator`. The fresh-context subagent reads the active goal's objective from the DB, inspects recent transcript state, and uses tools to verify the objective against real state. If it returns `{"verdict":"complete"}`, the worker calls `update_goal` with `completed_by: "evaluator"`. Distinct event: `goal_completed_by_evaluator`. The worker self-audit path stays as the always-available fallback if the subagent is unavailable or explicitly skipped.
 
 4. **Budget / cap enforcement.** At the start of each Stop hook run, the hook checks `tokens_used >= token_budget`, `continuations_remaining <= 0`, and elapsed wall-clock time. Any breach transitions the goal to `paused` with the appropriate `paused_reason` before checking for completion.
 
