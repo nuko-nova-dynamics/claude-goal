@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://nuko-nova-dynamics.github.io/claude-goal/">
-    <img alt="claude-goal — autonomous goal loop for Claude Code" src=".github/assets/social-card.png" width="720">
+    <img alt="claude-goal — autonomous goal loop for Claude Code" src=".github/assets/logo-horizontal.png" width="640">
   </a>
 </p>
 

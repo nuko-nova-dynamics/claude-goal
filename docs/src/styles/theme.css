@@ -92,13 +92,11 @@ a {
 [data-has-hero] .hero > .hero-html {
   width: 100%;
   max-width: 100%;
-  aspect-ratio: 1536 / 600;
-  object-fit: cover;
-  object-position: center;
-  border-radius: 10px;
-  border: 1px solid var(--sl-color-gray-5);
-  background: var(--sl-color-black);
   height: auto !important;
+  border-radius: 12px;
+  border: 1px solid var(--sl-color-gray-5);
+  background: #f5f0e8; /* matches the cream of the logo art */
+  display: block;
 }
 
 [data-has-hero] .hero h1 {

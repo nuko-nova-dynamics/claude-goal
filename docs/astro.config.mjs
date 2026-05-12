@@ -11,10 +11,10 @@ export default defineConfig({
     starlight({
       title: "claude-goal",
       logo: {
-        src: "./src/assets/icon.svg",
+        src: "./src/assets/logo-mark.png",
         replacesTitle: false,
       },
-      favicon: "/favicon.svg",
+      favicon: "/favicon.png",
       description:
         "Goal-bounded autonomous turns for Claude Code. Set an objective, set a budget, walk away.",
       social: [
@@ -38,21 +38,21 @@ export default defineConfig({
           attrs: {
             property: "og:image",
             content:
-              "https://nuko-nova-dynamics.github.io/claude-goal/social-card.png",
+              "https://nuko-nova-dynamics.github.io/claude-goal/logo-horizontal.png",
           },
         },
         {
           tag: "meta",
           attrs: {
             property: "og:image:width",
-            content: "1536",
+            content: "1448",
           },
         },
         {
           tag: "meta",
           attrs: {
             property: "og:image:height",
-            content: "1024",
+            content: "1086",
           },
         },
         {
@@ -64,7 +64,7 @@ export default defineConfig({
           attrs: {
             name: "twitter:image",
             content:
-              "https://nuko-nova-dynamics.github.io/claude-goal/social-card.png",
+              "https://nuko-nova-dynamics.github.io/claude-goal/logo-horizontal.png",
           },
         },
       ],
