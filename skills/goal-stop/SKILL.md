@@ -2,6 +2,8 @@
 name: goal-stop
 description: Alias for /goal-abandon. Abandons the current goal and stops the auto-continuation loop. Mirrors the multi-alias convention from Claude Code's native /goal (clear, stop, off, reset, cancel).
 disable-model-invocation: true
+allowed-tools:
+  - Bash
 ---
 
 The user invoked /goal-stop. Run this command via the Bash tool and report only its output. Do not call any other tools.

@@ -2,6 +2,8 @@
 name: goal-cleanup
 description: List or delete orphaned goals (those left behind by /clear). Use --list to see stale rows; --delete to remove them; --older-than HOURS to filter (default 24).
 disable-model-invocation: true
+allowed-tools:
+  - Bash
 ---
 
 The user invoked /goal-cleanup with arguments: $ARGUMENTS

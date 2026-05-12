@@ -2,6 +2,8 @@
 name: goal-extend
 description: Extend a cap-paused goal. Use --add-continuations N to add N more continuation turns, or --add-hours N to extend the wall-clock window. Resumes the goal automatically.
 disable-model-invocation: true
+allowed-tools:
+  - Bash
 ---
 
 The user invoked /goal-extend with arguments: $ARGUMENTS

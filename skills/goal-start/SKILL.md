@@ -1,6 +1,11 @@
 ---
 name: goal-start
-description: Start a new autonomous goal. The agent self-drives turns until the model passes a completion audit. Complements Claude Code's native /goal by adding deterministic token budgets, pause/resume, /extend, and persistence across restart.
+description: This skill should be used when the user invokes /goal-start with a quoted objective and optional --budget N flag. Creates a new autonomous goal that self-drives turns until the model passes its completion audit. Complements Claude Code's native /goal by adding deterministic token budgets, pause/resume, /goal-extend, and persistence across claude restart.
+allowed-tools:
+  - mcp__plugin_claude-goal_goal__create_goal
+  - mcp__plugin_claude-goal_goal__get_goal
+  - mcp__plugin_claude-goal_goal__update_goal
+  - Agent
 ---
 
 The user invoked /goal-start. Parse the arguments below — the objective is the quoted string, optionally followed by `--budget N`.

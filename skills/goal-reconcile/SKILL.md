@@ -2,6 +2,8 @@
 name: goal-reconcile
 description: Clear the accounting_uncertain flag set after /compact. Use --accept-reset to acknowledge that token accounting from before the compaction is lost; the goal resumes if it was paused for accounting_error.
 disable-model-invocation: true
+allowed-tools:
+  - Bash
 ---
 
 The user invoked /goal-reconcile with arguments: $ARGUMENTS

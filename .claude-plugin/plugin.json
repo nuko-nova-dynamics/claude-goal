@@ -2,6 +2,21 @@
   "name": "claude-goal",
   "version": "0.1.0",
   "description": "Codex-style autonomous goal loop. /goal-start \"objective\" runs the agent until the model passes its own completion audit.",
-  "author": { "name": "Nuko Nova Dynamics" },
+  "author": {
+    "name": "Nuko Nova Dynamics",
+    "email": "hello@nukonova.com"
+  },
+  "homepage": "https://github.com/nuko-nova-dynamics/claude-goal",
+  "repository": "https://github.com/nuko-nova-dynamics/claude-goal",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "autonomous-agent",
+    "goal-tracking",
+    "mcp",
+    "codex-port",
+    "anthropic"
+  ],
   "mcpServers": "./.mcp.json"
 }

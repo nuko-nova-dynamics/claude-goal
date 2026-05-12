@@ -2,6 +2,8 @@
 name: goal-history
 description: List past and current goals for this session (or all sessions with --all). Shows objective, status, tokens used, time, and continuations remaining for each goal. Pass --format=json for machine-readable output.
 disable-model-invocation: true
+allowed-tools:
+  - Bash
 ---
 
 The user invoked /goal-history with arguments: $ARGUMENTS
