@@ -49,7 +49,8 @@ if [[ -n "$AGENT_ID" ]]; then
     if [[ -r "$DERIVED_TRANSCRIPT" ]]; then
       ACCOUNT_TRANSCRIPT="$DERIVED_TRANSCRIPT"
     else
-      log_error "post-tool-batch: subagent transcript missing for agent_id=$AGENT_ID; falling back to transcript_path"
+      log_error "post-tool-batch: subagent transcript missing for agent_id=$AGENT_ID; skipping until transcript is readable"
+      exit 0
     fi
   fi
 fi

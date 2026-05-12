@@ -48,6 +48,19 @@ EOF
   [ "$ROW" = "0|27" ]
 }
 
+@test "post-tool-batch with agent_id skips accounting when subagent transcript is missing" {
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"agent_id\":\"missing-agent\",\"tool_calls\":[]}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/post-tool-batch.sh"
+  [ "$status" -eq 0 ]
+
+  ROW=$(sqlite3 "$DB_PATH" "SELECT tokens_used || '|' || subagent_tokens FROM goals WHERE session_id='s1';")
+  [ "$ROW" = "0|0" ]
+  CURSORS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM subagent_token_cursors WHERE session_id='s1';")
+  [ "$CURSORS" = "0" ]
+  EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE session_id='s1' AND event_type='tokens_accounted';")
+  [ "$EVENTS" = "0" ]
+}
+
 @test "post-tool-batch mixed parent and subagent batches accumulate independently" {
   INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"tool_calls\":[]}"
   run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/post-tool-batch.sh"

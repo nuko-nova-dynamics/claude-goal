@@ -19,8 +19,22 @@ export function getSchemaVersion(db: Database.Database): number {
   return row?.version ?? 0;
 }
 
-export function runMigrations(db: Database.Database): void {
-  const migrationsDir = join(__dirname, "migrations");
+function applyMigration(db: Database.Database, sql: string): void {
+  const lines = sql.split(/\r?\n/);
+  const pragmaLines = lines.filter((line) => /^\s*PRAGMA\b/i.test(line));
+  const transactionalSql = lines.filter((line) => !/^\s*PRAGMA\b/i.test(line)).join("\n");
+
+  if (pragmaLines.length > 0) {
+    db.exec(pragmaLines.join("\n"));
+  }
+  if (transactionalSql.trim().length > 0) {
+    db.transaction(() => {
+      db.exec(transactionalSql);
+    })();
+  }
+}
+
+export function runMigrations(db: Database.Database, migrationsDir = join(__dirname, "migrations")): void {
   const migrations = readdirSync(migrationsDir)
     .map((name) => {
       const match = name.match(/^(\d{3})_.*\.sql$/);
@@ -46,7 +60,7 @@ export function runMigrations(db: Database.Database): void {
     if (migration.version <= currentVersion) continue;
     if (migration.version > EXPECTED_VERSION) continue;
     const sql = readFileSync(join(migrationsDir, migration.name), "utf8");
-    db.exec(sql);
+    applyMigration(db, sql);
     currentVersion = getSchemaVersion(db);
   }
 

@@ -180,6 +180,7 @@ account_subagent_inline() {
   local session_id="$1"
   local transcript="$2"
   local agent_id="$3"
+  local retry_count="${4:-0}"
 
   [[ -z "$agent_id" ]] && return 0
 
@@ -347,6 +348,10 @@ account_subagent_inline() {
   " 2>/dev/null || echo "0")
   if [[ "$TX_RESULT" = "0" ]]; then
     log_info "post-tool-batch: version_race_lost (subagent) session_id=$session_id agent_id=$agent_id"
+    if (( retry_count < 2 )); then
+      sleep 0.05
+      account_subagent_inline "$session_id" "$transcript" "$agent_id" "$((retry_count + 1))"
+    fi
   fi
 }
 

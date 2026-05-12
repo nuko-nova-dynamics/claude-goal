@@ -264,6 +264,7 @@ case "$SUBCMD" in
         BEGIN IMMEDIATE;
         DELETE FROM goal_events WHERE session_id IN (SELECT session_id FROM goals WHERE updated_at_ms < $CUTOFF);
         DELETE FROM continuation_leases WHERE session_id IN (SELECT session_id FROM goals WHERE updated_at_ms < $CUTOFF);
+        DELETE FROM subagent_token_cursors WHERE session_id IN (SELECT session_id FROM goals WHERE updated_at_ms < $CUTOFF);
         DELETE FROM goals WHERE updated_at_ms < $CUTOFF;
         COMMIT;
       " >/dev/null 2>&1

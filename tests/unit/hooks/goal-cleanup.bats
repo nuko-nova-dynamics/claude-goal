@@ -35,12 +35,16 @@ teardown() {
 }
 
 @test "cleanup --delete --older-than 24 removes stale goals" {
+  sqlite3 "$DB_PATH" "INSERT INTO subagent_token_cursors (session_id, goal_id, agent_id, transcript_path, tokens_used, last_accounted_byte_offset, updated_at_ms)
+    VALUES ('stale-sess', 'g-stale', 'a1', '/tmp/agent-a1.jsonl', 12, 120, $STALE);"
   run "$CLI" cleanup --delete --older-than 24
   [ "$status" -eq 0 ]
   COUNT_STALE=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goals WHERE session_id='stale-sess';")
   COUNT_FRESH=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goals WHERE session_id='fresh-sess';")
+  COUNT_CURSOR=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM subagent_token_cursors WHERE session_id='stale-sess';")
   [ "$COUNT_STALE" = "0" ]
   [ "$COUNT_FRESH" = "1" ]
+  [ "$COUNT_CURSOR" = "0" ]
 }
 
 @test "cleanup requires --list or --delete" {

@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { openDb, runMigrations, getSchemaVersion } from "../src/db.js";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 describe("db migrations", () => {
   let dbPath: string;
+  const initialMigration = () => readFileSync(join(process.cwd(), "src/migrations/001_initial.sql"), "utf8");
+  const subagentMigration = () => readFileSync(join(process.cwd(), "src/migrations/002_subagent_tokens.sql"), "utf8");
 
   beforeEach(() => {
     const dir = mkdtempSync(join(tmpdir(), "claude-goal-test-"));
@@ -39,7 +41,7 @@ describe("db migrations", () => {
 
   it("migrates an existing v1 database to v2", () => {
     const db = openDb(dbPath);
-    db.exec(readFileSync(join(process.cwd(), "src/migrations/001_initial.sql"), "utf8"));
+    db.exec(initialMigration());
 
     runMigrations(db);
 
@@ -65,5 +67,41 @@ describe("db migrations", () => {
     runMigrations(db);
     db.prepare("UPDATE schema_version SET version = 999").run();
     expect(() => runMigrations(db)).toThrow(/db schema version 999 ahead/);
+  });
+
+  it("rolls back a partially failing migration so rerun can recover", () => {
+    const db = openDb(dbPath);
+    const migrationsDir = mkdtempSync(join(tmpdir(), "claude-goal-migrations-"));
+    writeFileSync(join(migrationsDir, "001_initial.sql"), initialMigration());
+    writeFileSync(join(migrationsDir, "002_subagent_tokens.sql"), `
+ALTER TABLE goals ADD COLUMN subagent_tokens INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE subagent_token_cursors (
+  session_id TEXT NOT NULL
+);
+INSERT INTO missing_table VALUES (1);
+UPDATE schema_version SET version = 2;
+`);
+
+    expect(() => runMigrations(db, migrationsDir)).toThrow();
+    expect(getSchemaVersion(db)).toBe(1);
+    expect(db.prepare("SELECT name FROM pragma_table_info('goals') WHERE name = 'subagent_tokens'").get()).toBeUndefined();
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='subagent_token_cursors'").get()).toBeUndefined();
+
+    writeFileSync(join(migrationsDir, "002_subagent_tokens.sql"), subagentMigration());
+
+    runMigrations(db, migrationsDir);
+    expect(getSchemaVersion(db)).toBe(2);
+    expect(db.prepare("SELECT name FROM pragma_table_info('goals') WHERE name = 'subagent_tokens'").get()).toBeTruthy();
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='subagent_token_cursors'").get()).toBeTruthy();
+  });
+
+  it("rejects a migration set with 001 and 003 but missing expected 002", () => {
+    const db = openDb(dbPath);
+    const migrationsDir = mkdtempSync(join(tmpdir(), "claude-goal-migrations-"));
+    writeFileSync(join(migrationsDir, "001_initial.sql"), initialMigration());
+    writeFileSync(join(migrationsDir, "003_future.sql"), "UPDATE schema_version SET version = 3;");
+
+    expect(() => runMigrations(db, migrationsDir)).toThrow(/db schema version 1 after migrations; expected 2/);
+    expect(getSchemaVersion(db)).toBe(1);
   });
 });
