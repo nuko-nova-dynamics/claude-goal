@@ -156,7 +156,7 @@ case "$SUBCMD" in
     STATUS_BEFORE_ESC=$(sql_escape "$STATUS_BEFORE")
     NOW=$(ms_now)
     sql "BEGIN IMMEDIATE;
-         UPDATE goals SET status='abandoned',
+         UPDATE goals SET status='abandoned', paused_reason=NULL,
            time_used_seconds = time_used_seconds + COALESCE((${NOW} - resume_at_ms)/1000, 0),
            resume_at_ms = NULL, version = version + 1, updated_at_ms = ${NOW}
          WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC';

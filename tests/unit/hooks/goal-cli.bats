@@ -97,6 +97,17 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   [ "$EVENTS" = "goal_paused:active>paused,goal_resumed:paused>active,goal_abandoned:active>abandoned" ]
 }
 
+@test "abandon clears cap pause reason" {
+  NOW=$(ms_now)
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'paused', 'continuation_cap', $NOW, $NOW, $NOW);"
+
+  run "$CLI" abandon
+  [ "$status" -eq 0 ]
+
+  STATUS=$(sqlite3 "$DB_PATH" "SELECT status, paused_reason IS NULL, resume_at_ms IS NULL FROM goals WHERE session_id='test-session';")
+  [ "$STATUS" = "abandoned|1|1" ]
+}
+
 @test "doctor runs without session_id" {
   unset CLAUDE_SESSION_ID
   run "$CLI" doctor

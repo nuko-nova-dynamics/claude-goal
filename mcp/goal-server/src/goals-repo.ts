@@ -181,6 +181,7 @@ export class GoalsRepo {
       this.db.prepare(`
         UPDATE goals SET
           status = 'abandoned',
+          paused_reason = NULL,
           time_used_seconds = time_used_seconds + ?,
           resume_at_ms = NULL, version = version + 1, updated_at_ms = ?
         WHERE session_id = ? AND goal_id = ?
