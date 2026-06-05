@@ -10,13 +10,13 @@ jobs:
     name: Bash hook tests (bats)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install bash-side dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y bats sqlite3 jq uuid-runtime
       - name: Set up Node (needed by release-tarball.bats which runs scripts/build-tarball.sh)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
@@ -33,8 +33,8 @@ jobs:
     name: MCP server tests (vitest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
