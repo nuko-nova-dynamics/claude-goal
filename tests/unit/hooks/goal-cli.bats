@@ -24,7 +24,7 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
 
 @test "status JSON includes remaining_tokens and bool accounting_uncertain" {
   NOW=$(ms_now)
-  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, tokens_used, subagent_tokens, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'active', 1000, 200, 50, $NOW, $NOW, $NOW);"
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, budget_source, tokens_used, subagent_tokens, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'active', 1000, 'tokens', 200, 50, $NOW, $NOW, $NOW);"
   run "$CLI" status --format=json
   [ "$status" -eq 0 ]
   REM=$(echo "$output" | jq -r '.remaining_tokens')
@@ -39,11 +39,19 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
 
 @test "status text includes subagent tokens" {
   NOW=$(ms_now)
-  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, tokens_used, subagent_tokens, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'active', 1000, 200, 50, $NOW, $NOW, $NOW);"
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, budget_source, tokens_used, subagent_tokens, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'active', 1000, 'tokens', 200, 50, $NOW, $NOW, $NOW);"
   run "$CLI" status
   [ "$status" -eq 0 ]
   [[ "$output" == *"Tokens: 200 / 1000 (750 remaining)"* ]]
   [[ "$output" == *"Subagent tokens: 50"* ]]
+}
+
+@test "status text displays budget profile source" {
+  NOW=$(ms_now)
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, budget_profile, budget_source, tokens_used, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'active', 5000000, 'deep', 'auto', 200, $NOW, $NOW, $NOW);"
+  run "$CLI" status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Budget: deep profile (auto)"* ]]
 }
 
 @test "pause when no active goal exits 2" {
@@ -90,7 +98,7 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
 
 @test "extend --add-tokens resumes budget_limited goal" {
   NOW=$(ms_now)
-  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, tokens_used, subagent_tokens, budget_limit_reported, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'budget_limited', 1000, 900, 100, 1, $NOW, $NOW);"
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, budget_source, tokens_used, subagent_tokens, budget_limit_reported, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'budget_limited', 1000, 'tokens', 900, 100, 1, $NOW, $NOW);"
 
   run "$CLI" extend --add-tokens 500
   [ "$status" -eq 0 ]
@@ -106,8 +114,8 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   run "$CLI" extend --add-tokens 500
   [ "$status" -eq 0 ]
 
-  BUDGET=$(sqlite3 "$DB_PATH" "SELECT token_budget FROM goals WHERE session_id='test-session';")
-  [ "$BUDGET" = "1500" ]
+  ROW=$(sqlite3 "$DB_PATH" "SELECT token_budget || '|' || budget_source || '|' || COALESCE(budget_profile, '') FROM goals WHERE session_id='test-session';")
+  [ "$ROW" = "1500|tokens|" ]
 }
 
 @test "reconcile --accept-reset clears flag and resumes accounting_error pause" {

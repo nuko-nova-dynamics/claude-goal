@@ -32,6 +32,12 @@ CREATE TABLE goals (
                                 'degraded','accounting_error'
                               ) OR paused_reason IS NULL),
   token_budget                INTEGER,
+  budget_profile              TEXT CHECK(budget_profile IN (
+                                'quick','standard','deep','overnight'
+                              ) OR budget_profile IS NULL),
+  budget_source               TEXT NOT NULL DEFAULT 'none' CHECK(budget_source IN (
+                                'none','tokens','profile','auto'
+                              )),
   tokens_used                 INTEGER NOT NULL DEFAULT 0,
   subagent_tokens             INTEGER NOT NULL DEFAULT 0,
   time_used_seconds           INTEGER NOT NULL DEFAULT 0,
@@ -68,7 +74,7 @@ CREATE TABLE subagent_token_cursors (
 );
 ```
 
-Migration history: v1 initial schema, v2 per-subagent token attribution, v3 `blocked` status.
+Migration history: v1 initial schema, v2 per-subagent token attribution, v3 `blocked` status, v4 budget profile/source provenance.
 
 The migration runner is in `mcp/goal-server/src/db.ts` — transactional, version-ordered, **downgrade-protected** (the runner refuses to run if `schema_version` exceeds the highest known migration).
 
@@ -118,7 +124,7 @@ In practice this matters when the worker calls `update_goal status:complete` mid
 
 Claude Code's `/compact` rewrites the session transcript JSONL — older messages are summarized into a single block, and existing byte cursors into the JSONL become meaningless.
 
-When the SessionStart hook detects `source=compact`, it sets `accounting_uncertain=1` on the active goal and emits a one-shot warning. The Stop hook still drives the loop, but new token accounting is suspect — the cursor is pointed at a different stream now.
+When the SessionStart hook detects `source=compact`, it sets `accounting_uncertain=1` on the active goal and emits a one-shot warning. The Stop hook still drives the loop, but new token accounting is suspect — the cursor is pointed at a different stream now. If a later cursor reset hits an accounting cap, the goal pauses with `paused_reason=accounting_error`.
 
 `/goal-reconcile --accept-reset` clears the flag, resets `transcript_cursor` to the current end-of-file, and resumes. You accept that some tokens between `last_advanced_at` and the `/compact` event are lost — the alternative would be to refuse to continue at all, which is worse.
 

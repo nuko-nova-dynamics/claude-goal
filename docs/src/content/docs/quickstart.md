@@ -18,6 +18,7 @@ Claude confirms the objective and begins working. The plugin has:
 1. Inserted a row into `goals.db` with `status=active`
 2. Stored the session ID so the Stop hook knows the goal is yours
 3. Initialized `tokens_used=0`, `subagent_tokens=0`, `continuations_remaining=50`, and a 4-hour wall-clock cap
+4. Left `token_budget` empty, because omitted budgets are intentionally unbounded
 
 ## 2. Watch the loop run
 
@@ -43,20 +44,20 @@ Returns something like:
   wall-clock used: 0h 03m / 4h
 ```
 
-## 3. Add a budget
+## 3. Add a budget profile
 
-Cancel the goal and start over with a hard token cap. Budgets are measured in **millions** of tokens — autonomous runs burn through 50K (one Claude Code input message) in seconds:
+Cancel the goal and start over with a profile. Profiles set the token cap, continuation cap, and wall-clock cap together:
 
 ```
 /goal-abandon
-/goal-start "list every .ts file under src/ and print a line count for each" --budget 500000
+/goal-start "list every .ts file under src/ and print a line count for each" --budget quick
 ```
 
-For this trivial task, 500K is far more than you need — it's the **floor** that makes any meaningful goal viable. Realistic budgets for actual refactors start at **2–3M** and overnight goals run **10–20M+**. See [Budgets and caps](/claude-goal/concepts/budgets/) for sizing.
+`quick` gives the run 500K tokens, 25 continuations, and 1 hour. For actual implementation work, start with `standard`. Use `deep` for broad refactors or integrations, `overnight` for explicitly long unattended runs, and `auto` when you want the plugin to select one deterministically from the objective. See [Budgets and caps](/claude-goal/concepts/budgets/) for the full table.
 
 When `(tokens_used + subagent_tokens) >= the budget`, the hook transitions the goal to `budget_limited` and emits the one-shot budget-limit prompt. The model sees that prompt, knows the goal is paused, and stops trying to continue.
 
-To raise the token budget and resume:
+To raise the token budget and resume, even for a profile-created goal:
 
 ```
 /goal-extend --add-tokens 500000

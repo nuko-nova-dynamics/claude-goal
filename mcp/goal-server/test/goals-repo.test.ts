@@ -22,40 +22,84 @@ describe("GoalsRepo.getBySession", () => {
 describe("GoalsRepo.create", () => {
   it("creates a new goal in active status", () => {
     const repo = freshRepo();
-    const goal = repo.create({ session_id: "s1", objective: "ship the auth migration", token_budget: 50000 });
+    const goal = repo.create({ session_id: "s1", objective: "ship the auth migration", token_budget: 50000, budget_profile: null });
     expect(goal.status).toBe("active");
     expect(goal.tokens_used).toBe(0);
     expect(goal.subagent_tokens).toBe(0);
     expect(goal.continuations_remaining).toBe(50);
+    expect(goal.max_wall_clock_seconds).toBe(14400);
+    expect(goal.budget_profile).toBeNull();
+    expect(goal.budget_source).toBe("tokens");
     expect(goal.resume_at_ms).toBeGreaterThan(0);
     expect(goal.goal_id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("creates an unbounded goal when no budget is provided", () => {
+    const repo = freshRepo();
+    const goal = repo.create({ session_id: "s1", objective: "explore", token_budget: null, budget_profile: null });
+    expect(goal.token_budget).toBeNull();
+    expect(goal.budget_profile).toBeNull();
+    expect(goal.budget_source).toBe("none");
+    expect(goal.continuations_remaining).toBe(50);
+    expect(goal.max_wall_clock_seconds).toBe(14400);
+  });
+
+  it("applies explicit budget profiles as full run envelopes", () => {
+    const repo = freshRepo();
+    const quick = repo.create({ session_id: "quick", objective: "inspect one file", token_budget: null, budget_profile: "quick" });
+    const standard = repo.create({ session_id: "standard", objective: "add a small feature with tests", token_budget: null, budget_profile: "standard" });
+    const deep = repo.create({ session_id: "deep", objective: "repo-wide migration", token_budget: null, budget_profile: "deep" });
+    const overnight = repo.create({ session_id: "overnight", objective: "run overnight", token_budget: null, budget_profile: "overnight" });
+
+    expect(quick).toMatchObject({ token_budget: 500000, budget_profile: "quick", budget_source: "profile", continuations_remaining: 25, max_wall_clock_seconds: 3600 });
+    expect(standard).toMatchObject({ token_budget: 2000000, budget_profile: "standard", budget_source: "profile", continuations_remaining: 75, max_wall_clock_seconds: 14400 });
+    expect(deep).toMatchObject({ token_budget: 5000000, budget_profile: "deep", budget_source: "profile", continuations_remaining: 150, max_wall_clock_seconds: 28800 });
+    expect(overnight).toMatchObject({ token_budget: 20000000, budget_profile: "overnight", budget_source: "profile", continuations_remaining: 500, max_wall_clock_seconds: 43200 });
+  });
+
+  it("resolves auto profiles deterministically", () => {
+    const repo = freshRepo();
+    const overnight = repo.create({ session_id: "s-overnight", objective: "keep working overnight until the migration is verified", token_budget: null, budget_profile: "auto" });
+    const deep = repo.create({ session_id: "s-deep", objective: "repo wide redesign with integrations across many named files", token_budget: null, budget_profile: "auto" });
+    const standard = repo.create({ session_id: "s-standard", objective: "implement a bounded bug fix with tests", token_budget: null, budget_profile: "auto" });
+    const quick = repo.create({ session_id: "s-quick", objective: "inspect config", token_budget: null, budget_profile: "auto" });
+
+    expect(overnight).toMatchObject({ budget_profile: "overnight", budget_source: "auto" });
+    expect(deep).toMatchObject({ budget_profile: "deep", budget_source: "auto" });
+    expect(standard).toMatchObject({ budget_profile: "standard", budget_source: "auto" });
+    expect(quick).toMatchObject({ budget_profile: "quick", budget_source: "auto" });
+  });
+
+  it("rejects token budget and budget profile together", () => {
+    const repo = freshRepo();
+    expect(() => repo.create({ session_id: "s1", objective: "x", token_budget: 1000, budget_profile: "quick" })).toThrow(/mutually exclusive/);
+  });
+
   it("rejects creation when active goal exists", () => {
     const repo = freshRepo();
-    repo.create({ session_id: "s1", objective: "first", token_budget: null });
-    expect(() => repo.create({ session_id: "s1", objective: "second", token_budget: null })).toThrow(/already exists.*active/);
+    repo.create({ session_id: "s1", objective: "first", token_budget: null, budget_profile: null });
+    expect(() => repo.create({ session_id: "s1", objective: "second", token_budget: null, budget_profile: null })).toThrow(/already exists.*active/);
   });
 
   it("rejects creation when paused goal exists", () => {
     const repo = freshRepo();
-    const first = repo.create({ session_id: "s1", objective: "first", token_budget: null });
+    const first = repo.create({ session_id: "s1", objective: "first", token_budget: null, budget_profile: null });
     repo.pause("s1", first.goal_id, "user");
-    expect(() => repo.create({ session_id: "s1", objective: "second", token_budget: null })).toThrow(/already exists.*paused/);
+    expect(() => repo.create({ session_id: "s1", objective: "second", token_budget: null, budget_profile: null })).toThrow(/already exists.*paused/);
   });
 
   it("rejects creation when blocked goal exists", () => {
     const repo = freshRepo();
-    const first = repo.create({ session_id: "s1", objective: "first", token_budget: null });
+    const first = repo.create({ session_id: "s1", objective: "first", token_budget: null, budget_profile: null });
     repo.markBlocked("s1", first.goal_id, "waiting on user input");
-    expect(() => repo.create({ session_id: "s1", objective: "second", token_budget: null })).toThrow(/already exists.*blocked/);
+    expect(() => repo.create({ session_id: "s1", objective: "second", token_budget: null, budget_profile: null })).toThrow(/already exists.*blocked/);
   });
 
   it("replaces a complete goal with goal_replaced event", () => {
     const repo = freshRepo();
-    const first = repo.create({ session_id: "s1", objective: "first", token_budget: null });
+    const first = repo.create({ session_id: "s1", objective: "first", token_budget: null, budget_profile: null });
     repo.markComplete("s1", first.goal_id);
-    const second = repo.create({ session_id: "s1", objective: "second", token_budget: null });
+    const second = repo.create({ session_id: "s1", objective: "second", token_budget: null, budget_profile: null });
     expect(second.goal_id).not.toBe(first.goal_id);
     expect(second.status).toBe("active");
     expect(second.subagent_tokens).toBe(0);
@@ -66,13 +110,13 @@ describe("GoalsRepo.create", () => {
 
   it("replacement resets continuation and wall-clock caps", () => {
     const repo = freshRepo();
-    const first = repo.create({ session_id: "s1", objective: "first", token_budget: null });
+    const first = repo.create({ session_id: "s1", objective: "first", token_budget: null, budget_profile: null });
     repo["db"]
       .prepare("UPDATE goals SET continuations_remaining = 3, max_wall_clock_seconds = 999999 WHERE session_id = 's1'")
       .run();
     repo.markComplete("s1", first.goal_id);
 
-    const second = repo.create({ session_id: "s1", objective: "second", token_budget: null });
+    const second = repo.create({ session_id: "s1", objective: "second", token_budget: null, budget_profile: null });
 
     expect(second.continuations_remaining).toBe(50);
     expect(second.max_wall_clock_seconds).toBe(14400);
@@ -80,19 +124,19 @@ describe("GoalsRepo.create", () => {
 
   it("rejects empty objective", () => {
     const repo = freshRepo();
-    expect(() => repo.create({ session_id: "s1", objective: "", token_budget: null })).toThrow();
+    expect(() => repo.create({ session_id: "s1", objective: "", token_budget: null, budget_profile: null })).toThrow();
   });
 
   it("rejects objective > 4000 chars", () => {
     const repo = freshRepo();
-    expect(() => repo.create({ session_id: "s1", objective: "a".repeat(4001), token_budget: null })).toThrow();
+    expect(() => repo.create({ session_id: "s1", objective: "a".repeat(4001), token_budget: null, budget_profile: null })).toThrow();
   });
 });
 
 describe("GoalsRepo.markComplete", () => {
   it("transitions active → complete and flushes wall-clock", () => {
     const repo = freshRepo();
-    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
     // simulate 2s elapsed
     repo.testHelper_setResumeAt(g.session_id, Date.now() - 2000);
     repo.markComplete("s1", g.goal_id);
@@ -104,7 +148,7 @@ describe("GoalsRepo.markComplete", () => {
 
   it("rejects completing an abandoned goal", () => {
     const repo = freshRepo();
-    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
     repo.abandon("s1", g.goal_id);
     expect(() => repo.markComplete("s1", g.goal_id)).toThrow(/cannot.*complete.*status/);
   });
@@ -113,7 +157,7 @@ describe("GoalsRepo.markComplete", () => {
 describe("GoalsRepo.markBlocked", () => {
   it("transitions active to blocked and records reason", () => {
     const repo = freshRepo();
-    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
     repo.testHelper_setResumeAt(g.session_id, Date.now() - 2000);
     repo.markBlocked("s1", g.goal_id, "external approval required");
 
@@ -133,7 +177,7 @@ describe("GoalsRepo.markBlocked", () => {
 
   it("rejects blocking a completed goal", () => {
     const repo = freshRepo();
-    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
     repo.markComplete("s1", g.goal_id);
     expect(() => repo.markBlocked("s1", g.goal_id, "late blocker")).toThrow(/cannot mark blocked from status 'complete'/);
   });
@@ -142,7 +186,7 @@ describe("GoalsRepo.markBlocked", () => {
 describe("GoalsRepo.pause/resume", () => {
   it("pause(user) flushes wall-clock and clears resume_at", () => {
     const repo = freshRepo();
-    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
     repo.testHelper_setResumeAt("s1", Date.now() - 5000);
     repo.pause("s1", g.goal_id, "user");
     const after = repo.getBySession("s1")!;
@@ -154,7 +198,7 @@ describe("GoalsRepo.pause/resume", () => {
 
   it("resume(user-paused) sets resume_at and active", () => {
     const repo = freshRepo();
-    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
     repo.pause("s1", g.goal_id, "user");
     repo.resume("s1", g.goal_id);
     const after = repo.getBySession("s1")!;
@@ -165,14 +209,14 @@ describe("GoalsRepo.pause/resume", () => {
 
   it("resume rejects cap-paused goals", () => {
     const repo = freshRepo();
-    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
     repo.pause("s1", g.goal_id, "continuation_cap");
     expect(() => repo.resume("s1", g.goal_id)).toThrow(/use \/goal-extend/i);
   });
 
   it("resume restarts a blocked goal", () => {
     const repo = freshRepo();
-    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
     repo.markBlocked("s1", g.goal_id, "needs credentials");
     repo.resume("s1", g.goal_id);
 

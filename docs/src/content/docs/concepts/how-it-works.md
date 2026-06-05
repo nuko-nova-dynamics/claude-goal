@@ -18,7 +18,7 @@ sequenceDiagram
     participant DB as SQLite
     participant E as goal-evaluator
 
-    U->>CC: /goal-start "objective" --budget 3000000
+    U->>CC: /goal-start "objective" --budget standard
     CC->>DB: create_goal (status=active)
     loop until done / blocked / paused / capped
         CC->>CC: assistant turn
@@ -87,6 +87,8 @@ At the start of every Stop hook run:
 | `elapsed_wall_clock >= wall_clock_cap` | `status=paused`, `paused_reason=wall_clock_cap` |
 | Catch-all error in hook | `status=paused`, `paused_reason=degraded` |
 
+Named profiles expand during `create_goal`: `quick`, `standard`, `deep`, and `overnight` each set `token_budget`, `continuations_remaining`, and `max_wall_clock_seconds`. `auto` deterministically selects one of those profiles from the objective text. Raw numeric budgets set `token_budget` only.
+
 `/goal-extend` is how you raise a cap and resume.
 
 ## 5. F5 — final-turn token accounting
@@ -103,10 +105,10 @@ All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode).
 
 | Table | Purpose |
 |---|---|
-| `goals` | One row per goal — status, token counts, continuation budget, wall-clock usage, version (for optimistic concurrency) |
+| `goals` | One row per goal — status, token counts, budget profile/source, continuation budget, wall-clock usage, version (for optimistic concurrency) |
 | `goal_events` | Full audit log — every status transition, completion event, accounting reset, cap fire, etc. |
 | `subagent_token_cursors` | Per-`agent_id` byte cursor into each subagent's transcript JSONL |
-| `schema_version` | Migration version (current: 3). Migration runner is in `mcp/goal-server/src/db.ts` — transactional, version-ordered, downgrade-protected. |
+| `schema_version` | Migration version (current: 4). Migration runner is in `mcp/goal-server/src/db.ts` — transactional, version-ordered, downgrade-protected. |
 
 The `goals` table has a unique constraint on `session_id` for active goals, so a session can only own one live goal at a time.
 
@@ -116,7 +118,7 @@ The bundled MCP server (`mcp/goal-server`) exposes three tools:
 
 | Tool | Caller | Effect |
 |---|---|---|
-| `create_goal` | `/goal-start` skill | Insert a new goal row. Replaces any prior completed/abandoned goal for this session. |
+| `create_goal` | `/goal-start` skill | Insert a new goal row with either `budget_profile` or `token_budget`. Replaces any prior completed/abandoned goal for this session. |
 | `get_goal` | Worker, evaluator subagent | Read the active goal — used by the evaluator to learn the objective. |
 | `update_goal` | Worker on completion or genuine blocker | Transition to `complete` or `blocked`. `completed_by` enum distinguishes `self_update` from `evaluator` for completion. |
 

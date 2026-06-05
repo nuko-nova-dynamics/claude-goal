@@ -1,28 +1,28 @@
 ---
 title: Run a goal under budget
-description: A worked example of an hour-long autonomous refactor with a multi-million-token budget, watching it pause, and resuming with extra turns.
+description: A worked example of an autonomous refactor with a budget profile, watching caps, and resuming with extra room.
 sidebar:
   order: 1
 ---
 
-This recipe walks through what a **real** autonomous goal looks like: hours of wall-clock time, hundreds of turns, millions of tokens.
+This recipe walks through what a **real** autonomous goal looks like: hours of wall-clock time, many turns, profile-sized token headroom.
 
 ## The scenario
 
 You want Claude to refactor an authentication module to use async/await. Multiple files, contract preservation, tests must pass. You expect this to take **1–3 hours of model time** if it works end-to-end.
 
-## Set the budget for the shape of the work
+## Pick the profile for the shape of the work
 
 ```
-/goal-start "refactor src/auth/* to use async/await; preserve existing test contracts; ensure all tests in test/auth/ pass" --budget 3000000
+/goal-start "refactor src/auth/* to use async/await; preserve existing test contracts; ensure all tests in test/auth/ pass" --budget deep
 ```
 
-Notes on the objective and the budget:
+Notes on the objective and the profile:
 
 - **Concrete scope** — `src/auth/*`, not "the auth code"
 - **Explicit acceptance criterion** — tests pass in `test/auth/`
 - **Constraint** — preserve existing contracts (a hint to the evaluator: contract-breaking refactors → `incomplete`)
-- **Budget at 3M tokens** — a multi-file refactor with verification will burn 1–2M comfortably; 3M leaves headroom so we don't trip on the first iteration
+- **`deep` profile** — 5M tokens, 150 continuations, and 8 hours. That leaves room for a multi-file refactor plus evaluator feedback without manually sizing three caps.
 
 ## What the loop looks like at minute 15
 
@@ -31,16 +31,17 @@ Notes on the objective and the budget:
 
 ◎ Goal: refactor src/auth/* to use async/await...
   status:      active
-  tokens:      612,043 worker · 84,200 subagent (696,243 / 3,000,000)
-  continuations remaining: 32 / 50
-  wall-clock used: 0h 15m / 4h
+  budget:      deep profile
+  tokens:      612,043 worker · 84,200 subagent (696,243 / 5,000,000)
+  continuations remaining: 112 / 150
+  wall-clock used: 0h 15m / 8h
 ```
 
 Worker has read several files, made initial changes, and the evaluator has dispatched once to check progress (subagent tokens are non-zero). The cache has warmed — subsequent turns are cheap.
 
-## At minute 45 — first continuation cap
+## If the continuation cap fires
 
-50 continuation turns is the default. For a real refactor you'll burn through them before completion:
+Profile caps are intentionally larger than the unprofiled defaults, but a real refactor can still burn through its continuation budget before completion:
 
 ```
 /goal-status
@@ -48,12 +49,13 @@ Worker has read several files, made initial changes, and the evaluator has dispa
 ◎ Goal: refactor src/auth/* to use async/await...
   status:      paused
   paused_reason: continuation_cap
-  tokens:      1,401,328 worker · 211,400 subagent (1,612,728 / 3,000,000)
-  continuations remaining: 0 / 50
-  wall-clock used: 0h 47m / 4h
+  budget:      deep profile
+  tokens:      2,401,328 worker · 311,400 subagent (2,712,728 / 5,000,000)
+  continuations remaining: 0 / 150
+  wall-clock used: 2h 47m / 8h
 ```
 
-The token budget is fine — you've used about half. The turn cap fired. Extend it:
+The token budget is fine. The turn cap fired. Extend it:
 
 ```
 /goal-extend --add-continuations 100
@@ -103,24 +105,25 @@ Final status:
 ◎ Goal: refactor src/auth/* to use async/await...
   status:      complete
   completed_by: evaluator
-  tokens:      2,341,801 worker · 392,500 subagent (2,734,301 / 3,000,000)
+  budget:      deep profile
+  tokens:      2,341,801 worker · 392,500 subagent (2,734,301 / 5,000,000)
   duration:    2h 14m
 ```
 
-Came in under budget, took just over two hours, **150 continuation turns**. That's a real autonomous run.
+Came in under budget, took just over two hours, and stayed inside the `deep` run envelope. That's a real autonomous run.
 
 ## What if the goal reaches `budget_limited`?
 
-Suppose the goal stalls and burns through the 3M cap:
+Suppose the goal stalls and burns through the 5M cap:
 
 ```
 /goal-status
 
 ◎ Goal: refactor src/auth/* to use async/await...
   status:      budget_limited
-  tokens:      2,941,820 worker · 58,180 subagent (3,000,000 / 3,000,000)
+  budget:      deep profile
+  tokens:      4,941,820 worker · 58,180 subagent (5,000,000 / 5,000,000)
   continuations remaining: 12 / 150
-  paused_reason: budget_limited
 ```
 
 You have three real options:
@@ -143,20 +146,23 @@ If the transcript shows looping or the objective needs to be narrowed, abandon a
 
 | Pattern | Good for |
 |---|---|
-| `--budget 500000` | Single-file changes with a quick evaluator pass. Floor for anything meaningful. |
-| `--budget 2000000`–`3000000` | Bounded refactors with clear acceptance criteria. The sweet spot for "real work." |
-| `--budget 5000000`–`10000000` | Multi-file refactors, doc generation, broad cleanups. |
-| `--budget 20000000+` plus `--add-hours 12` | Overnight long-running goals. Set the wall-clock cap to match. |
+| `--budget quick` | Single-file changes, inspection, or quick evaluator passes. |
+| `--budget standard` | Bounded features, bug fixes with tests, and medium refactors. |
+| `--budget deep` | Multi-file refactors, migrations, doc generation, broad cleanups, integrations. |
+| `--budget overnight` | Explicit overnight/weekend long-running goals. |
+| `--budget auto` | Let deterministic objective matching pick one of the profiles. |
 | No budget | Exploration. Monitor with `/goal-status`. |
 
 ## Patterns that don't work
 
-- **Tiny budgets** (`--budget 50000`). One input turn in a real codebase is already 50–100K. The cap will fire on turn one and the plugin will look broken.
+- **Tiny raw budgets** (`--budget 50000`). One input turn in a real codebase is already 50–100K. The cap will fire on turn one and the plugin will look broken.
 - **Vague objectives** (`"clean up the code"`). The evaluator has nothing to verify against.
 - **Unverifiable objectives** (`"wait until the build completes"` with no build running). Wall-clock cap eventually catches this, but you waste turns first.
-- **Objectives that lie about scope** (`"refactor everything"` with `--budget 200000`). The goal pauses with the work obviously unfinished.
+- **Objectives that lie about scope** (`"refactor everything"` with `--budget quick`). The goal pauses with the work obviously unfinished.
 
-## A budget-sizing intuition
+## Advanced token-sizing intuition
+
+Raw token numbers are still supported, but they are the advanced path. If you choose to use them:
 
 Pessimistically: assume `~30k–60k` tokens *per turn* in a warm cache, `~80k–150k` tokens *per turn* in a cold cache or with heavy file reads.
 

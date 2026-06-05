@@ -12,13 +12,16 @@ Every command lives under the `/goal-*` namespace.
 ### `/goal-start`
 
 ```
-/goal-start "<objective>" [--budget N]
+/goal-start "<objective>" [--budget quick|standard|deep|overnight|auto|N]
 ```
 
 Start a new autonomous goal. Replaces any prior `complete` or `abandoned` goal for this session. Fails if an `active`, `paused`, `blocked`, or `budget_limited` goal already exists — abandon it first.
 
 - `<objective>` — quoted. Concrete, achievable objectives work best. Auto-mode's classifier may block vague objectives like `"do the task"`.
-- `--budget N` — optional. Hard cap on `(tokens_used + subagent_tokens)`. When breached, the goal moves to `status=budget_limited`.
+- `--budget quick|standard|deep|overnight` — optional. Selects a full run envelope: token budget, continuation cap, and wall-clock cap.
+- `--budget auto` — optional. Deterministically picks a profile from the objective. Explicit overnight/weekend wording selects `overnight`; broad migrations, redesigns, integrations, or repo-wide work select `deep`; bounded features and bug fixes with tests select `standard`; small inspection-style work falls back to `quick`.
+- `--budget N` — optional advanced form. Sets a raw hard cap on `(tokens_used + subagent_tokens)` and leaves the default continuation/wall-clock caps in place.
+- Omit `--budget` for an unbounded token budget. The default continuation and wall-clock caps still apply.
 
 ### `/goal-status`
 
@@ -26,7 +29,7 @@ Start a new autonomous goal. Replaces any prior `complete` or `abandoned` goal f
 /goal-status
 ```
 
-Show the active goal's status, token totals, continuations remaining, wall-clock used, and any warnings (e.g. `accounting_uncertain` after `/compact`).
+Show the active goal's status, budget profile/source, token totals, continuations remaining, wall-clock used, and any warnings (e.g. `accounting_uncertain` after `/compact`).
 
 ### `/goal-pause` · `/goal-resume`
 
@@ -72,7 +75,7 @@ All three flags require positive integers and are mutually exclusive.
 /goal-reconcile --accept-reset
 ```
 
-Clear the `accounting_uncertain` flag set after `/compact`. Resets `transcript_cursor` to the current end-of-file. Resumes the goal if it was paused for `accounting_uncertain` specifically.
+Clear the `accounting_uncertain` flag set after `/compact` or a cursor reset. Resets `transcript_cursor` to the current end-of-file. Resumes the goal if it was paused for `accounting_error`.
 
 `--accept-reset` is required — the flag exists explicitly so you opt in to "yes, I know I'm losing some token accounting between the last advance and the compact event."
 
@@ -105,7 +108,7 @@ Exit 0 with a green report = ready to use. Anything red is a config issue to fix
 /goal-history --format=json --all
 ```
 
-Returns one row per tracked goal. Columns: status, paused reason, worker tokens, subagent tokens, time started, time elapsed, continuations remaining, budget.
+Returns one row per tracked goal. Columns: status, paused reason, worker tokens, subagent tokens, time started, time elapsed, continuations remaining, budget profile, budget source, and token budget.
 
 `--format=json` is the audit hook — pipe it to `jq` for analysis.
 

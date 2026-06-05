@@ -43,7 +43,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "create_goal",
-      description: "Create a new goal. Only call this when the user explicitly invokes /goal-start — do not infer goals from ordinary tasks. Fails if a goal already exists in 'active', 'paused', 'blocked', or 'budget_limited' status; replaces any 'complete' or 'abandoned' prior goal.",
+      description: "Create a new goal. Only call this when the user explicitly invokes /goal-start — do not infer goals from ordinary tasks. Accept either token_budget or budget_profile, never both. Fails if a goal already exists in 'active', 'paused', 'blocked', or 'budget_limited' status; replaces any 'complete' or 'abandoned' prior goal.",
       inputSchema: {
         type: "object",
         required: envSessionId ? ["objective"] : ["session_id", "objective"],
@@ -51,7 +51,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           session_id: { type: "string" },
           objective: { type: "string", minLength: 1, maxLength: 4000 },
-          token_budget: { type: ["integer", "null"], minimum: 1 },
+          token_budget: { type: ["integer", "null"], minimum: 1, description: "Advanced raw token cap. Omit when budget_profile is set." },
+          budget_profile: { type: ["string", "null"], enum: ["quick", "standard", "deep", "overnight", "auto", null], description: "Human-friendly run envelope. Omit for an unbounded goal or when token_budget is set." },
         },
       },
     },
@@ -84,7 +85,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       result = handleGetGoal(repo, args as { session_id: string });
       break;
     case "create_goal":
-      result = handleCreateGoal(repo, args as { session_id: string; objective: string; token_budget: number | null });
+      result = handleCreateGoal(repo, args as { session_id: string; objective: string; token_budget?: number | null; budget_profile?: "quick" | "standard" | "deep" | "overnight" | "auto" | null });
       break;
     case "update_goal":
       result = handleUpdateGoal(repo, args as { session_id: string; goal_id?: string; status: "complete" | "blocked"; completed_by?: "self_update" | "evaluator"; blocked_reason?: string | null });

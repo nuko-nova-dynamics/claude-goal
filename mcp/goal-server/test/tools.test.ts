@@ -20,6 +20,55 @@ describe("create_goal tool", () => {
     const out = handleCreateGoal(repo, { session_id: "s1", objective: "ship it", token_budget: 1000 });
     expect(out.goal!.status).toBe("active");
     expect(out.goal!.objective).toBe("ship it");
+    expect(out.goal!.token_budget).toBe(1000);
+    expect(out.goal!.budget_source).toBe("tokens");
+    expect(out.goal!.budget_profile).toBeNull();
+  });
+
+  it("leaves omitted budget unbounded", () => {
+    const repo = freshRepo();
+    const out = handleCreateGoal(repo, { session_id: "s1", objective: "ship it" });
+    expect(out.goal!.token_budget).toBeNull();
+    expect(out.goal!.budget_source).toBe("none");
+    expect(out.goal!.budget_profile).toBeNull();
+  });
+
+  it("accepts explicit budget profile names", () => {
+    const repo = freshRepo();
+    const out = handleCreateGoal(repo, { session_id: "s1", objective: "ship it", budget_profile: "deep" });
+    expect(out.goal!).toMatchObject({
+      token_budget: 5000000,
+      budget_profile: "deep",
+      budget_source: "profile",
+      continuations_remaining: 150,
+      max_wall_clock_seconds: 28800,
+    });
+  });
+
+  it("resolves auto profile from objective", () => {
+    const repo = freshRepo();
+    const out = handleCreateGoal(repo, {
+      session_id: "s1",
+      objective: "run a repo-wide migration and verify tests",
+      budget_profile: "auto",
+    });
+    expect(out.goal!).toMatchObject({
+      token_budget: 5000000,
+      budget_profile: "deep",
+      budget_source: "auto",
+    });
+  });
+
+  it("rejects invalid budget_profile values", () => {
+    const repo = freshRepo();
+    const out = handleCreateGoal(repo, { session_id: "s1", objective: "ship it", budget_profile: "huge" as never });
+    expect(out.error).toMatch(/budget_profile must be one of/);
+  });
+
+  it("rejects token_budget and budget_profile together", () => {
+    const repo = freshRepo();
+    const out = handleCreateGoal(repo, { session_id: "s1", objective: "ship it", token_budget: 1000, budget_profile: "quick" });
+    expect(out.error).toMatch(/mutually exclusive/);
   });
 
   it("returns structured error when goal exists", () => {

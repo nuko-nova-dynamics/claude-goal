@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
+import { BUDGET_PROFILES, type BudgetProfile, type BudgetProfileInput, type BudgetSource, resolveBudgetProfile } from "./budget-profiles.js";
 
 export type GoalStatus = "active" | "paused" | "blocked" | "budget_limited" | "complete" | "abandoned";
 export type PausedReason = "user" | "continuation_cap" | "wall_clock_cap" | "cleared" | "degraded" | "accounting_error";
@@ -11,6 +12,8 @@ export interface Goal {
   status: GoalStatus;
   paused_reason: PausedReason | null;
   token_budget: number | null;
+  budget_profile: BudgetProfile | null;
+  budget_source: BudgetSource;
   tokens_used: number;
   subagent_tokens: number;
   time_used_seconds: number;
@@ -31,6 +34,7 @@ export interface CreateGoalInput {
   session_id: string;
   objective: string;
   token_budget: number | null;
+  budget_profile: BudgetProfileInput | null;
 }
 
 export class GoalsRepo {
@@ -54,6 +58,20 @@ export class GoalsRepo {
     if (input.token_budget !== null && input.token_budget <= 0) {
       throw new Error("token_budget must be positive");
     }
+    if (input.token_budget !== null && input.budget_profile !== null) {
+      throw new Error("token_budget and budget_profile are mutually exclusive");
+    }
+
+    const resolvedProfile = input.budget_profile ? resolveBudgetProfile(input.budget_profile, input.objective) : null;
+    const profileConfig = resolvedProfile ? BUDGET_PROFILES[resolvedProfile] : null;
+    const tokenBudget = profileConfig?.token_budget ?? input.token_budget;
+    const continuationsRemaining = profileConfig?.continuations_remaining ?? 50;
+    const maxWallClockSeconds = profileConfig?.max_wall_clock_seconds ?? 14400;
+    const budgetSource: BudgetSource =
+      input.budget_profile === "auto" ? "auto" :
+      input.budget_profile ? "profile" :
+      input.token_budget !== null ? "tokens" :
+      "none";
 
     const txn = this.db.transaction(() => {
       const existing = this.getBySession(input.session_id);
@@ -69,14 +87,16 @@ export class GoalsRepo {
         this.db.prepare(`
           UPDATE goals SET
             goal_id = ?, objective = ?, status = 'active', paused_reason = NULL,
-            token_budget = ?, tokens_used = 0, subagent_tokens = 0, time_used_seconds = 0,
+            token_budget = ?, budget_profile = ?, budget_source = ?,
+            tokens_used = 0, subagent_tokens = 0, time_used_seconds = 0,
             resume_at_ms = ?, last_accounted_byte_offset = 0, last_accounted_uuid = NULL,
             accounting_uncertain = 0, last_continuation_at_ms = NULL,
-            continuations_remaining = 50, max_wall_clock_seconds = 14400,
+            continuations_remaining = ?, max_wall_clock_seconds = ?,
             budget_limit_reported = 0,
             version = version + 1, created_at_ms = ?, updated_at_ms = ?
           WHERE session_id = ?
-        `).run(goal_id, input.objective, input.token_budget, now, now, now, input.session_id);
+        `).run(goal_id, input.objective, tokenBudget, resolvedProfile, budgetSource,
+          now, continuationsRemaining, maxWallClockSeconds, now, now, input.session_id);
         this.db.prepare("DELETE FROM subagent_token_cursors WHERE session_id = ?").run(input.session_id);
 
         this.recordEvent(input.session_id, goal_id, "goal_replaced", null, "active",
@@ -84,10 +104,12 @@ export class GoalsRepo {
       } else {
         this.db.prepare(`
           INSERT INTO goals (
-            session_id, goal_id, objective, status, token_budget, resume_at_ms,
-            created_at_ms, updated_at_ms
-          ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?)
-        `).run(input.session_id, goal_id, input.objective, input.token_budget, now, now, now);
+            session_id, goal_id, objective, status, token_budget, budget_profile,
+            budget_source, continuations_remaining, max_wall_clock_seconds,
+            resume_at_ms, created_at_ms, updated_at_ms
+          ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(input.session_id, goal_id, input.objective, tokenBudget, resolvedProfile,
+          budgetSource, continuationsRemaining, maxWallClockSeconds, now, now, now);
 
         this.recordEvent(input.session_id, goal_id, "goal_created", null, "active", null);
       }

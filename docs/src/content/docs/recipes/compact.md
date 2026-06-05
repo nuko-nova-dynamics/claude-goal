@@ -12,14 +12,14 @@ Claude Code's `/compact` rewrites the session transcript JSONL — older message
 1. You run `/compact` during an active goal.
 2. The next time SessionStart fires (on the next session restore or hook trigger), the hook detects `source=compact`.
 3. The active goal's `accounting_uncertain` flag flips to `1`.
-4. The next Stop hook fire emits a one-shot warning to the model and pauses the goal with `paused_reason=accounting_uncertain`.
+4. The next Stop hook fire warns about uncertain accounting. If a later cursor reset hits an accounting cap, the goal pauses with `paused_reason=accounting_error`.
 
 ```
 /goal-status
 
 ◎ Goal: <objective>
   status:      paused
-  paused_reason: accounting_uncertain
+  paused_reason: accounting_error
   tokens:      24,500 worker · 1,800 subagent  (last known — may undercount)
   ⚠ /compact event detected. Run /goal-reconcile --accept-reset to resume.
 ```
@@ -61,7 +61,7 @@ If `/compact` fired because the goal was already off the rails (e.g. the model w
 
 ```
 /goal-abandon
-/goal-start "<refined objective>" --budget <new budget>
+/goal-start "<refined objective>" --budget standard
 ```
 
 The prior goal's row stays in `goal_history` for reference.

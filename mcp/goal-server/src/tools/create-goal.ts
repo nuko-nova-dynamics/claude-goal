@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { GoalsRepo, Goal } from "../goals-repo.js";
+import { isBudgetProfileInput, type BudgetProfileInput } from "../budget-profiles.js";
 
 const OBJECTIVE_MAX = 4000;
 
@@ -26,7 +27,7 @@ function settingsHaveHooksDisabled(): string | null {
 
 export function handleCreateGoal(
   repo: GoalsRepo,
-  args: { session_id: string; objective: string; token_budget: number | null }
+  args: { session_id: string; objective: string; token_budget?: number | null; budget_profile?: BudgetProfileInput | null }
 ): { goal?: Goal; error?: string } {
   const disabledIn = settingsHaveHooksDisabled();
   if (disabledIn) {
@@ -42,11 +43,20 @@ export function handleCreateGoal(
       error: `objective exceeds ${OBJECTIVE_MAX} characters (got ${args.objective.length}). Trim the objective or split into smaller goals.`,
     };
   }
+  const tokenBudget = args.token_budget ?? null;
+  const budgetProfile = args.budget_profile ?? null;
+  if (tokenBudget !== null && budgetProfile !== null) {
+    return { error: "token_budget and budget_profile are mutually exclusive" };
+  }
+  if (budgetProfile !== null && !isBudgetProfileInput(budgetProfile)) {
+    return { error: `budget_profile must be one of quick, standard, deep, overnight, auto; got '${budgetProfile}'` };
+  }
   try {
     const goal = repo.create({
       session_id: args.session_id,
       objective: args.objective,
-      token_budget: args.token_budget,
+      token_budget: tokenBudget,
+      budget_profile: budgetProfile,
     });
     return { goal };
   } catch (e) {

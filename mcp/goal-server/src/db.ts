@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const EXPECTED_VERSION = 3;
+const EXPECTED_VERSION = 4;
 
 export function openDb(path: string): Database.Database {
   const db = new Database(path);

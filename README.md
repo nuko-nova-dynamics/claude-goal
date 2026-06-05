@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <em>Goal-bounded autonomous turns for Claude Code. Set an objective, set a budget, walk away.</em>
+  <em>Goal-bounded autonomous turns for Claude Code. Set an objective, pick a budget profile when you need one, walk away.</em>
 </p>
 
 <p align="center">
@@ -13,7 +13,7 @@
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/github/license/nuko-nova-dynamics/claude-goal?style=flat&color=4a4a4a"></a>
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/actions/workflows/test.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/nuko-nova-dynamics/claude-goal/test.yml?branch=main&style=flat&label=tests"></a>
   <img alt="claude code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=flat">
-  <img alt="tests" src="https://img.shields.io/badge/tests-207_green-4a4a4a?style=flat">
+  <img alt="tests" src="https://img.shields.io/badge/tests-218_green-4a4a4a?style=flat">
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@
 
 ## What is this
 
-`claude-goal` is a Claude Code plugin that drives the agent through an autonomous loop until a goal is provably met. Type `/goal-start "objective"` and the agent self-iterates — each turn ends in a Stop-hook continuation that feeds the next prompt — until **one** of the following: the model passes its own completion audit, the work is genuinely blocked, the token budget exhausts, the turn count exhausts, or you stop it.
+`claude-goal` is a Claude Code plugin that drives the agent through an autonomous loop until a goal is provably met. Type `/goal-start "objective"` and the agent self-iterates — each turn ends in a Stop-hook continuation that feeds the next prompt — until **one** of the following: the model passes its own completion audit, the work is genuinely blocked, a budget profile or raw token budget exhausts, the turn count exhausts, the wall-clock cap exhausts, or you stop it.
 
 It's a production-grade companion to Claude Code 2.1.139+'s built-in `/goal`. The native command is great for casual conditions; this plugin adds **deterministic budgets, lifecycle controls, `/compact` recovery, persistence across restarts, and a tool-equipped evaluator subagent** that verifies completion by running tests / reading files / checking exit codes — not by trusting the worker's self-narrative.
 
@@ -44,8 +44,8 @@ It's a production-grade companion to Claude Code 2.1.139+'s built-in `/goal`. Th
 | | Built-in `/goal` (2.1.139+) | `claude-goal` |
 |---|---|---|
 | Autonomous continuation | ✓ | ✓ |
-| Token budget | phrase in condition | `--budget N`, deterministic |
-| Turn / time caps | phrase in condition | hard 50-turn / 4h caps, `/goal-extend` to raise |
+| Budget control | phrase in condition | deterministic profiles (`quick`, `standard`, `deep`, `overnight`, `auto`) or raw token caps |
+| Turn / time caps | phrase in condition | profile-sized hard caps, `/goal-extend` to raise |
 | Pause · resume · abandon | `/goal clear` only | `/goal-pause`, `/goal-resume`, `/goal-abandon` |
 | Blocked-state recovery | prompt-only | `status=blocked`, visible status, `/goal-resume` |
 | `/compact` recovery | n/a | `accounting_uncertain` flag + `/goal-reconcile` |
@@ -64,15 +64,14 @@ Run them side-by-side. They don't collide.
 # Start a goal
 /goal-start "list all .ts files under src/ and print a line count for each"
 
-# Or set a token budget — sized in millions, not thousands. Real autonomous
-# refactors run for hours across hundreds of turns.
-/goal-start "refactor the auth module to use async/await" --budget 3000000
+# Or pick a run profile. Profiles set token, continuation, and wall-clock caps.
+/goal-start "refactor the auth module to use async/await" --budget standard
 ```
 
 Claude confirms the goal, begins working, and continues across turns without further prompting. When it decides the objective is met, it dispatches the evaluator subagent for verification, then calls `update_goal` and stops.
 
 > [!TIP]
-> **Budget sizing is in millions of tokens.** A single Claude Code input message in a real codebase is already 50K–100K. Floor: `--budget 500000`. Comfortable real-work range: `2M–5M`. Overnight: `20M+`. See [`docs/concepts/budgets`](https://nuko-nova-dynamics.github.io/claude-goal/concepts/budgets/) for sizing intuition.
+> Start with profile names, not raw token math: `quick` (500K tokens, 25 turns, 1h), `standard` (2M, 75 turns, 4h), `deep` (5M, 150 turns, 8h), `overnight` (20M, 500 turns, 12h), or `auto` for deterministic objective-based selection. Omitting `--budget` remains unbounded. Raw token numbers still work for advanced tuning. See [`docs/concepts/budgets`](https://nuko-nova-dynamics.github.io/claude-goal/concepts/budgets/) for details.
 
 ## How it works
 
@@ -85,7 +84,7 @@ sequenceDiagram
     participant DB as SQLite
     participant Eval as goal-evaluator subagent
 
-    User->>CC: /goal-start "objective" --budget 3000000
+    User->>CC: /goal-start "objective" --budget standard
     CC->>DB: create_goal (status=active)
     loop until done / blocked / paused / capped
         CC->>CC: assistant turn (tools, edits, reasoning)
@@ -116,11 +115,11 @@ sequenceDiagram
 
 **Blocked state.** If the same blocker repeats across at least three consecutive continuation turns and no meaningful progress is possible without user input or an external-state change, the worker can call `update_goal status:blocked blocked_reason:"..."`. Blocked goals stop auto-continuing, stay visible in status/history, and can be restarted with `/goal-resume`.
 
-**Budget / cap enforcement.** At the start of each Stop hook run, the hook checks `(tokens_used + subagent_tokens) >= token_budget`, `continuations_remaining <= 0`, and elapsed wall-clock. Token-budget breaches transition to `budget_limited`; continuation and wall-clock caps transition to `paused` with `paused_reason` set.
+**Budget / cap enforcement.** At goal creation, a named profile expands into a token budget, continuation cap, and wall-clock cap; raw token budgets remain token-only. At the start of each Stop hook run, the hook checks `(tokens_used + subagent_tokens) >= token_budget`, `continuations_remaining <= 0`, and elapsed wall-clock. Token-budget breaches transition to `budget_limited`; continuation and wall-clock caps transition to `paused` with `paused_reason` set.
 
 **F5 final-turn accounting.** The completion turn's tokens are captured by a bounded retry loop after `detect_update_goal` returns true, and again when `update_goal` has already moved the row to `complete` before Stop reads the final transcript bytes. Five retries at 100ms intervals re-run `account_advance_inline` to catch transcripts that flush after the start-of-hook accounting pass.
 
-**State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, continuation budget, wall-clock usage, and a full audit log in `goal_events`. Schema is migration-versioned through v3, including subagent cursor storage and the `blocked` lifecycle state.
+**State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, selected budget profile/source, continuation budget, wall-clock usage, and a full audit log in `goal_events`. Schema is migration-versioned through v4, including subagent cursor storage, the `blocked` lifecycle state, and budget profile provenance.
 
 **MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, `update_goal`. Slash-command skills invoke `create_goal`; the worker invokes `update_goal` on completion or a genuine blocker; all other lifecycle ops go through `scripts/goal-cli.sh`.
 
@@ -130,8 +129,8 @@ sequenceDiagram
 
 | Command | What it does |
 |---|---|
-| `/goal-start "objective" [--budget N]` | Start a new goal. Replaces any prior completed/abandoned goal for this session. |
-| `/goal-status` | Current goal, status, worker + subagent tokens, continuations remaining, warnings. |
+| `/goal-start "objective" [--budget quick\|standard\|deep\|overnight\|auto\|N]` | Start a new goal. Omit `--budget` for unbounded. Replaces any prior completed/abandoned goal for this session. |
+| `/goal-status` | Current goal, status, selected budget profile/source, worker + subagent tokens, continuations remaining, warnings. |
 | `/goal-pause` · `/goal-resume` | User pause/resume, or resume a blocked goal. |
 | `/goal-abandon` (`/goal-stop`) | Abandon permanently. Stops the auto-continuation loop. |
 | `/goal-extend --add-continuations N` | Raise turn cap on a `continuation_cap`-paused goal and resume. |

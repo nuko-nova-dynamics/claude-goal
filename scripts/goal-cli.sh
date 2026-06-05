@@ -113,7 +113,14 @@ case "$SUBCMD" in
     if [[ "$FORMAT" == "json" ]]; then
       echo "$ENRICHED"
     else
-      echo "$ENRICHED" | jq -r '"Goal: \(.objective)\nStatus: \(.status)\(if .paused_reason then " (\(.paused_reason))" else "" end)\nTokens: \(.tokens_used)\(if .token_budget then " / \(.token_budget) (\(.remaining_tokens) remaining)" else "" end)\nSubagent tokens: \(.subagent_tokens)\nTime: \(.time_used_seconds)s\nContinuations remaining: \(.continuations_remaining)\(if .accounting_uncertain then "\nWARNING: accounting uncertain — see /goal-reconcile" else "" end)"'
+      echo "$ENRICHED" | jq -r '
+        def budget_label:
+          if .budget_source == "auto" then "\(.budget_profile) profile (auto)"
+          elif .budget_source == "profile" then "\(.budget_profile) profile"
+          elif .budget_source == "tokens" then "raw tokens"
+          else "unbounded"
+          end;
+        "Goal: \(.objective)\nStatus: \(.status)\(if .paused_reason then " (\(.paused_reason))" else "" end)\nBudget: \(budget_label)\nTokens: \(.tokens_used)\(if .token_budget then " / \(.token_budget) (\(.remaining_tokens) remaining)" else "" end)\nSubagent tokens: \(.subagent_tokens)\nTime: \(.time_used_seconds)s\nContinuations remaining: \(.continuations_remaining)\(if .accounting_uncertain then "\nWARNING: accounting uncertain — see /goal-reconcile" else "" end)"'
     fi
     ;;
   pause)
@@ -222,6 +229,8 @@ case "$SUBCMD" in
       NOW=$(ms_now)
       UPDATE_RESULT=$(sql "UPDATE goals SET
              token_budget = COALESCE(token_budget, tokens_used + subagent_tokens) + ${ADD_TOKENS},
+             budget_profile = CASE WHEN token_budget IS NULL THEN NULL ELSE budget_profile END,
+             budget_source = CASE WHEN token_budget IS NULL THEN 'tokens' ELSE budget_source END,
              status = CASE WHEN status = 'budget_limited' THEN 'active' ELSE status END,
              paused_reason = CASE WHEN status = 'budget_limited' THEN NULL ELSE paused_reason END,
              resume_at_ms = CASE WHEN status = 'budget_limited' THEN ${NOW} ELSE resume_at_ms END,
@@ -252,7 +261,8 @@ case "$SUBCMD" in
     fi
     ROWS=$(sql -json "
       SELECT session_id, goal_id, objective, status, paused_reason,
-             tokens_used, subagent_tokens, token_budget, continuations_remaining,
+             tokens_used, subagent_tokens, token_budget, budget_profile, budget_source,
+             continuations_remaining,
              time_used_seconds, created_at_ms, updated_at_ms
       FROM goals
       $WHERE_CLAUSE
@@ -270,7 +280,14 @@ case "$SUBCMD" in
     if [[ "$FORMAT" = "json" ]]; then
       echo "$ROWS"
     else
-      echo "$ROWS" | jq -r '.[] | "[\(.status)\(if .paused_reason then " (\(.paused_reason))" else "" end)] \(.objective) — tokens=\(.tokens_used)\(if .token_budget then "/\(.token_budget)" else "" end), subagent_tokens=\(.subagent_tokens // 0), time=\(.time_used_seconds)s, continuations_remaining=\(.continuations_remaining)\n  goal_id=\(.goal_id) session=\(.session_id) created_at_ms=\(.created_at_ms)"'
+      echo "$ROWS" | jq -r '
+        def budget_label:
+          if .budget_source == "auto" then "\(.budget_profile) profile (auto)"
+          elif .budget_source == "profile" then "\(.budget_profile) profile"
+          elif .budget_source == "tokens" then "raw tokens"
+          else "unbounded"
+          end;
+        .[] | "[\(.status)\(if .paused_reason then " (\(.paused_reason))" else "" end)] \(.objective) — budget=\(budget_label), tokens=\(.tokens_used)\(if .token_budget then "/\(.token_budget)" else "" end), subagent_tokens=\(.subagent_tokens // 0), time=\(.time_used_seconds)s, continuations_remaining=\(.continuations_remaining)\n  goal_id=\(.goal_id) session=\(.session_id) created_at_ms=\(.created_at_ms)"'
     fi
     ;;
   reconcile)
@@ -339,7 +356,7 @@ case "$SUBCMD" in
     if [[ -w "$DATA_DIR" ]]; then add_check plugin_data_writable pass "$DATA_DIR"; else add_check plugin_data_writable fail "$DATA_DIR not writable"; fi
     # Schema version
     SV=$(sqlite3 "$DB_PATH" "SELECT version FROM schema_version;" 2>/dev/null || echo "")
-    if [[ "$SV" = "3" ]]; then add_check schema_version pass "3"; else add_check schema_version fail "got '$SV'"; fi
+    if [[ "$SV" = "4" ]]; then add_check schema_version pass "4"; else add_check schema_version fail "got '$SV'"; fi
     # Dependencies
     for dep in node jq sqlite3 envsubst; do
       if command -v "$dep" >/dev/null 2>&1; then add_check "${dep}_present" pass; else add_check "${dep}_present" fail "$dep not found in PATH"; fi

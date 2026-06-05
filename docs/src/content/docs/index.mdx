@@ -1,9 +1,9 @@
 ---
 title: claude-goal
-description: Goal-bounded autonomous turns for Claude Code. Set an objective, set a budget, walk away.
+description: Goal-bounded autonomous turns for Claude Code. Set an objective, pick a budget profile when you need one, walk away.
 template: splash
 hero:
-  tagline: A production-grade autonomous loop for Claude Code — built around a Stop-hook continuation engine and a tool-equipped completion evaluator. Set an objective, set a budget, walk away.
+  tagline: A production-grade autonomous loop for Claude Code — built around a Stop-hook continuation engine and a tool-equipped completion evaluator. Set an objective, pick a budget profile when you need one, walk away.
   actions:
     - text: Quickstart
       link: /claude-goal/quickstart/
@@ -58,7 +58,7 @@ It's the production-grade companion to Claude Code 2.1.139+'s built-in `/goal` �
 
 <CardGrid>
   <Card title="Deterministic budgets" icon="seti:db">
-    `--budget N` enforces a hard token ceiling across worker + subagent turns. The hook math is plain SQLite — no model in the loop deciding when to stop.
+    `--budget quick|standard|deep|overnight|auto` expands into hard token, turn, and wall-clock caps. Raw token numbers still work for advanced tuning. The hook math is plain SQLite — no model in the loop deciding when to stop.
   </Card>
   <Card title="Tool-equipped evaluator" icon="approve-check">
     The completion check runs as a fresh-context subagent with Bash, Read, and sqlite3. It verifies with **evidence**, not optimistic transcript language.
@@ -85,13 +85,13 @@ It's the production-grade companion to Claude Code 2.1.139+'s built-in `/goal` �
 
 Claude confirms the goal, begins working, and the Stop hook feeds it a continuation prompt at the end of each turn. When the objective is met, it dispatches the evaluator subagent for verification, then calls `update_goal` and stops.
 
-For a budget-bounded run — note that real autonomous goals run for **hours and millions of tokens**, so budgets are sized in millions:
+For a bounded run, pick a profile instead of doing token math:
 
 ```
-/goal-start "refactor the auth module to use async/await" --budget 3000000
+/goal-start "refactor the auth module to use async/await" --budget standard
 ```
 
-When `(tokens_used + subagent_tokens) >= 3000000`, the hook transitions the goal to `budget_limited` and emits a one-shot budget-limit prompt. See [Budgets and caps](/claude-goal/concepts/budgets/) for how to size a budget for the shape of your goal.
+`standard` gives the run 2M tokens, 75 continuations, and 4 hours. Omit `--budget` for an unbounded goal, use `auto` for deterministic objective-based selection, or pass a raw token number when you need exact control. See [Budgets and caps](/claude-goal/concepts/budgets/) for the full profile table.
 
 ## Deep dive
 

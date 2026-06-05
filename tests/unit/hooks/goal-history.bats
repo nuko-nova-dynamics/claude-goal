@@ -20,12 +20,12 @@ setup() {
   T_OLD=$((NOW - 30000))
   T_MID=$((NOW - 20000))
   T_NEW=$((NOW - 10000))
-  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, subagent_tokens, token_budget, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
-    VALUES ('s-old', 'g-old', 'oldest goal', 'complete', NULL, 5000, 700, 10000, 47, 12, $T_OLD, $T_OLD);"
-  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, subagent_tokens, token_budget, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
-    VALUES ('s-mid', 'g-mid', 'middle goal', 'abandoned', 'user', 2000, 0, NULL, 49, 5, $T_MID, $T_MID);"
-  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, subagent_tokens, token_budget, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
-    VALUES ('s-current', 'g-current', 'current session goal', 'active', NULL, 1000, 300, NULL, 50, 3, $T_NEW, $T_NEW);"
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, subagent_tokens, token_budget, budget_source, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
+    VALUES ('s-old', 'g-old', 'oldest goal', 'complete', NULL, 5000, 700, 10000, 'tokens', 47, 12, $T_OLD, $T_OLD);"
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, subagent_tokens, token_budget, budget_source, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
+    VALUES ('s-mid', 'g-mid', 'middle goal', 'abandoned', 'user', 2000, 0, NULL, 'none', 49, 5, $T_MID, $T_MID);"
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, tokens_used, subagent_tokens, token_budget, budget_profile, budget_source, continuations_remaining, time_used_seconds, created_at_ms, updated_at_ms)
+    VALUES ('s-current', 'g-current', 'current session goal', 'active', NULL, 1000, 300, 2000000, 'standard', 'profile', 75, 3, $T_NEW, $T_NEW);"
 }
 
 teardown() {
@@ -65,6 +65,7 @@ teardown() {
   echo "$output" | jq -e 'type == "array" and length == 3' >/dev/null
   echo "$output" | jq -e '.[0].objective == "current session goal"' >/dev/null
   echo "$output" | jq -e '.[0].subagent_tokens == 300' >/dev/null
+  echo "$output" | jq -e '.[0].budget_profile == "standard" and .[0].budget_source == "profile"' >/dev/null
 }
 
 @test "history with no goals in this session prints a hint" {
@@ -83,5 +84,7 @@ teardown() {
   [[ "$output" == *"[abandoned (user)]"* ]]
   [[ "$output" == *"tokens=5000/10000"* ]]
   [[ "$output" == *"subagent_tokens=700"* ]]
+  [[ "$output" == *"budget=standard profile"* ]]
+  [[ "$output" == *"budget=raw tokens"* ]]
   [[ "$output" == *"tokens=2000"* ]]
 }

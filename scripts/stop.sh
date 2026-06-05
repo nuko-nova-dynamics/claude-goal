@@ -205,15 +205,17 @@ run_f5_final_turn_accounting() {
   # Record an explicit F5 event only when a retry advanced beyond the
   # start-of-hook accounting cursor. This can happen after update_goal has
   # already transitioned the row to complete.
-  sql_retry "INSERT INTO goal_events
-    (session_id, goal_id, hook_name, event_type, status_before, status_after,
-     version_before, version_after, pid, created_at_ms)
-    SELECT '$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'final_turn_accounted',
-      '$STATUS_ESC', status, $VERSION, version, $$, $NOW
-    FROM goals
-    WHERE session_id = '$SESSION_ID_ESC'
-      AND goal_id = '$GOAL_ID_ESC'
-      AND last_accounted_byte_offset > $baseline_offset;" 2>/dev/null || true
+  local final_row final_status final_version final_offset final_status_esc
+  final_row=$(sql_retry "SELECT status || '|' || version || '|' || COALESCE(last_accounted_byte_offset, 0) FROM goals WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC';" 2>/dev/null || echo "")
+  IFS='|' read -r final_status final_version final_offset <<< "$final_row"
+  if [[ "$final_offset" =~ ^[0-9]+$ && "$final_version" =~ ^[0-9]+$ ]] && (( final_offset > baseline_offset )); then
+    final_status_esc=$(sql_escape "$final_status")
+    sql_retry "INSERT INTO goal_events
+      (session_id, goal_id, hook_name, event_type, status_before, status_after,
+       version_before, version_after, pid, created_at_ms)
+      VALUES ('$SESSION_ID_ESC', '$GOAL_ID_ESC', 'stop', 'final_turn_accounted',
+        '$STATUS_ESC', '$final_status_esc', $VERSION, $final_version, $$, $NOW);" 2>/dev/null || true
+  fi
 }
 
 case "$STATUS" in
