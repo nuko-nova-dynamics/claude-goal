@@ -1,7 +1,7 @@
 {
   "name": "claude-goal",
-  "version": "0.1.1",
-  "description": "Codex-style autonomous goal loop. /goal-start \"objective\" runs the agent until the model passes its own completion audit.",
+  "version": "0.2.0",
+  "description": "Codex-style autonomous goal loop with smart budget profiles. /goal-start \"objective\" runs the agent until the goal is verified, blocked, or capped.",
   "author": {
     "name": "Nuko Nova Dynamics",
     "email": "hello@nukonova.com"

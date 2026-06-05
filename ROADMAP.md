@@ -1,6 +1,6 @@
 # claude-goal Roadmap
 
-This document captures what shipped in v0.1.0 and what's planned for later versions.
+This document captures what shipped and what's planned for later versions.
 
 v0.1.0 is the **production-grade goal-management** layer that complements Claude Code's built-in `/goal` (shipped in CC 2.1.139). Where the built-in is a session-scoped Stop hook plus a Haiku evaluator, this plugin adds deterministic budgets, lifecycle commands (pause/resume/extend/abandon), `/compact` recovery, SQLite persistence, a plugin subagent evaluator that verifies with tools, and F5 final-turn token accounting.
 
@@ -53,7 +53,7 @@ List the current session's tracked goal by default, or every tracked session wit
 
 Anthropic's native `/goal` works in `claude -p` (one-shot) and Remote Control. Phase 2 validated this plugin's `-p` path end-to-end, including evaluator dispatch, `goal_completed_by_evaluator`, per-subagent token attribution, and F5 post-completion accounting. Remote Control is available in `claude --help`, but the dedicated interactive Remote Control smoke is deferred to v0.1.1 hardening.
 
-## v0.2+ — speculative
+## v0.3+ — speculative
 
 - **Multi-objective goals** with per-objective progress tracking: `/goal-start "A=tests pass; B=lint clean; C=doc updated"` then completion needs all three.
 - **Cost preview**: before `/goal-start`, run a tiny Haiku prompt over the objective to estimate "this will likely cost ~N tokens", warn if `--budget` is way under.
@@ -73,5 +73,6 @@ Anthropic's native `/goal` works in `claude -p` (one-shot) and Remote Control. P
 |---|---|---|
 | v0.1.0 | 2026-05-11 | Initial public beta — goal lifecycle commands, budgets, `/compact` recovery, SQLite persistence, F5 final-turn accounting, evaluator subagent, per-subagent token attribution, `/goal-history`, and `-p` validation |
 | v0.1.1 | 2026-05-12 | Maintenance — CI fix, repo hygiene, identity cleanup |
-| v0.1.x | rolling | Bugfixes from outside-user feedback |
-| v0.2.0 | speculative | Multi-objective goals, cost preview, web overlay, marketplace publish |
+| v0.2.0 | 2026-06-05 | Smart budget profiles — `quick`, `standard`, `deep`, `overnight`, deterministic `auto`, schema v4 provenance, profile-aware status/history |
+| v0.2.x | rolling | Bugfixes from outside-user feedback |
+| v0.3.0 | speculative | Multi-objective goals, cost preview, web overlay, marketplace publish |

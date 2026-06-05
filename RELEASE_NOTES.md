@@ -1,3 +1,49 @@
+# claude-goal v0.2.0
+
+**Smart budget profiles for smoother `/goal-start` UX.**
+
+This release makes budgeted goals human-friendly: users can now write profile names instead of raw token counts.
+
+## What's new
+
+- `/goal-start "objective"` still starts an unbounded token-budget goal by default.
+- `/goal-start "objective" --budget quick|standard|deep|overnight|auto` now selects a full run envelope.
+- Profiles set token budget, continuation cap, and wall-clock cap together:
+  - `quick`: 500K tokens, 25 continuations, 1 hour
+  - `standard`: 2M tokens, 75 continuations, 4 hours
+  - `deep`: 5M tokens, 150 continuations, 8 hours
+  - `overnight`: 20M tokens, 500 continuations, 12 hours
+- `auto` deterministically selects a profile from the objective text:
+  - explicit overnight/weekend wording -> `overnight`
+  - migrations, repo-wide refactors, redesigns, integrations, multi-module changes, or many named files -> `deep`
+  - bounded features, bug fixes with tests, or medium refactors -> `standard`
+  - narrow inspection-style work -> `quick`
+- Raw numeric budgets remain supported as an advanced path and are mutually exclusive with `budget_profile`.
+- `/goal-status` and `/goal-history` now show the selected profile and whether it was explicit, auto-selected, raw tokens, or unbounded.
+
+## Migration notes
+
+- SQLite schema moves to v4 and adds `goals.budget_profile` plus `goals.budget_source`.
+- Existing budgeted goals migrate as `budget_source='tokens'`; unbudgeted goals migrate as `budget_source='none'`.
+- `/goal-doctor` now checks for schema version 4.
+- `--add-tokens` on an unbudgeted active goal now marks the goal as raw-token sourced so status/history stay coherent.
+
+## Reliability
+
+- F5 final-turn token accounting now records the `final_turn_accounted` audit event from the final observed row state, making the completion-token audit trail more reliable when transcripts flush late.
+
+## Docs and tests
+
+- README and docs now lead with profile names and move raw token sizing to advanced sections.
+- Verified locally:
+  - `npm --prefix mcp/goal-server test` — 78 passed
+  - `npm --prefix mcp/goal-server run build`
+  - `bats $(find tests -name '*.bats' | sort)` — 140 passed
+  - `npm --prefix docs run build`
+  - `git diff --check`
+
+---
+
 # claude-goal v0.1.1
 
 **Maintenance patch — no functional changes.**
