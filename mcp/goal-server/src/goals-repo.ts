@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import { BUDGET_PROFILES, type BudgetProfile, type BudgetProfileInput, type BudgetSource, resolveBudgetProfile } from "./budget-profiles.js";
+import { BUDGET_PROFILES, isBudgetProfileInput, type BudgetProfile, type BudgetProfileInput, type BudgetSource, resolveBudgetProfile } from "./budget-profiles.js";
 
 export type GoalStatus = "active" | "paused" | "blocked" | "budget_limited" | "complete" | "abandoned";
 export type PausedReason = "user" | "continuation_cap" | "wall_clock_cap" | "cleared" | "degraded" | "accounting_error";
@@ -52,14 +52,20 @@ export class GoalsRepo {
   }
 
   create(input: CreateGoalInput): Goal {
-    if (input.objective.length < 1 || input.objective.length > 4000) {
+    if (typeof input.session_id !== "string" || input.session_id.length === 0) {
+      throw new Error("session_id is required");
+    }
+    if (typeof input.objective !== "string" || input.objective.trim().length < 1 || input.objective.length > 4000) {
       throw new Error("objective must be 1-4000 characters");
     }
-    if (input.token_budget !== null && input.token_budget <= 0) {
-      throw new Error("token_budget must be positive");
+    if (input.token_budget !== null && (!Number.isInteger(input.token_budget) || input.token_budget <= 0)) {
+      throw new Error("token_budget must be a positive integer");
     }
     if (input.token_budget !== null && input.budget_profile !== null) {
       throw new Error("token_budget and budget_profile are mutually exclusive");
+    }
+    if (input.budget_profile !== null && !isBudgetProfileInput(input.budget_profile)) {
+      throw new Error("budget_profile must be one of quick, standard, deep, overnight, auto");
     }
 
     const resolvedProfile = input.budget_profile ? resolveBudgetProfile(input.budget_profile, input.objective) : null;

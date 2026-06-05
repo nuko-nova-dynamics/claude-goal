@@ -1,3 +1,31 @@
+# claude-goal v0.2.1
+
+**Runtime hardening for smart budget goal creation.**
+
+This patch release keeps the v0.2.0 budget-profile feature set unchanged and tightens malformed-input handling around `create_goal`.
+
+## Fixed
+
+- MCP `create_goal` now validates `session_id`, `objective`, and `token_budget` at runtime before calling the repository layer.
+- Raw token budgets must be positive integers, so malformed clients cannot pass string, zero, negative, or fractional token budgets into SQLite-backed goal state.
+- Non-string objectives now return a structured `objective is required` error instead of risking a thrown `.trim()` call.
+- `GoalsRepo.create` now independently rejects blank session IDs, whitespace-only objectives, invalid budget profiles, and malformed raw token budgets before writing.
+
+## Migration notes
+
+- No schema change from v0.2.0. Existing v4 databases continue to work unchanged.
+- Budget profiles, `auto`, raw token budgets, status/history profile display, and `--add-tokens` behavior are unchanged.
+
+## Verified locally
+
+- `npm --prefix mcp/goal-server test` - 83 passed
+- `npm --prefix mcp/goal-server run build`
+- `bats $(find tests -name '*.bats' | sort)` - 140 passed
+- `npm --prefix docs run build`
+- `git diff --check`
+
+---
+
 # claude-goal v0.2.0
 
 **Smart budget profiles for smoother `/goal-start` UX.**

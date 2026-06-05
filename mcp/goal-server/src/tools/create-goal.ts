@@ -35,7 +35,10 @@ export function handleCreateGoal(
       error: `cannot create goal: disableAllHooks=true is set in ${disabledIn}. The claude-goal continuation loop depends on Stop, PostToolBatch, and SessionStart hooks. Remove disableAllHooks (or set to false) and restart claude.`,
     };
   }
-  if (!args.objective || args.objective.trim().length === 0) {
+  if (typeof args.session_id !== "string" || args.session_id.length === 0) {
+    return { error: "session_id is required" };
+  }
+  if (typeof args.objective !== "string" || args.objective.trim().length === 0) {
     return { error: "objective is required" };
   }
   if (args.objective.length > OBJECTIVE_MAX) {
@@ -45,6 +48,9 @@ export function handleCreateGoal(
   }
   const tokenBudget = args.token_budget ?? null;
   const budgetProfile = args.budget_profile ?? null;
+  if (tokenBudget !== null && (!Number.isInteger(tokenBudget) || tokenBudget <= 0)) {
+    return { error: "token_budget must be a positive integer" };
+  }
   if (tokenBudget !== null && budgetProfile !== null) {
     return { error: "token_budget and budget_profile are mutually exclusive" };
   }

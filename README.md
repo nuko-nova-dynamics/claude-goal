@@ -157,7 +157,7 @@ Updates land via `/plugin update claude-goal` once new versions are tagged.
 
 ```bash
 mkdir -p ~/.claude/plugins/local/claude-goal
-tar -xzf claude-goal-v0.2.0.tar.gz -C ~/.claude/plugins/local/claude-goal
+tar -xzf claude-goal-v0.2.1.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 

@@ -71,6 +71,19 @@ describe("create_goal tool", () => {
     expect(out.error).toMatch(/mutually exclusive/);
   });
 
+  it("rejects malformed raw token budgets", () => {
+    const repo = freshRepo();
+    expect(handleCreateGoal(repo, { session_id: "s1", objective: "ship it", token_budget: "1000" as never }).error).toMatch(/positive integer/);
+    expect(handleCreateGoal(repo, { session_id: "s2", objective: "ship it", token_budget: 1.5 }).error).toMatch(/positive integer/);
+    expect(handleCreateGoal(repo, { session_id: "s3", objective: "ship it", token_budget: 0 }).error).toMatch(/positive integer/);
+  });
+
+  it("rejects missing session_id", () => {
+    const repo = freshRepo();
+    expect(handleCreateGoal(repo, { session_id: "", objective: "ship it", token_budget: null }).error).toMatch(/session_id is required/);
+    expect(handleCreateGoal(repo, { session_id: 123 as never, objective: "ship it", token_budget: null }).error).toMatch(/session_id is required/);
+  });
+
   it("returns structured error when goal exists", () => {
     const repo = freshRepo();
     handleCreateGoal(repo, { session_id: "s1", objective: "first", token_budget: null });
@@ -87,6 +100,12 @@ describe("create_goal tool", () => {
   it("rejects whitespace-only objective", () => {
     const repo = freshRepo();
     const out = handleCreateGoal(repo, { session_id: "s1", objective: "   ", token_budget: null });
+    expect(out.error).toMatch(/objective is required/);
+  });
+
+  it("rejects non-string objective without throwing", () => {
+    const repo = freshRepo();
+    const out = handleCreateGoal(repo, { session_id: "s1", objective: 123 as never, token_budget: null });
     expect(out.error).toMatch(/objective is required/);
   });
 

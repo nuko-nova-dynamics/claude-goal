@@ -17,4 +17,7 @@ setup() {
   [[ "$ENTRIES" == *"agents/goal-evaluator.md"* ]]
   [[ "$ENTRIES" == *"LICENSE"* ]]
   [[ "$ENTRIES" == *"RELEASE_NOTES.md"* ]]
+  [[ "$ENTRIES" != *"mcp/goal-server/node_modules/.vite/"* ]]
+  [[ "$ENTRIES" != *"mcp/goal-server/node_modules/.cache/"* ]]
+  [[ "$ENTRIES" != *"vitest/results.json"* ]]
 }

@@ -26,6 +26,7 @@ cp mcp/goal-server/package.json mcp/goal-server/package-lock.json "$STAGE/mcp/go
 cp -R mcp/goal-server/dist mcp/goal-server/node_modules "$STAGE/mcp/goal-server/"
 
 (cd "$STAGE/mcp/goal-server" && npm prune --omit=dev >/dev/null)
+rm -rf "$STAGE/mcp/goal-server/node_modules/.vite" "$STAGE/mcp/goal-server/node_modules/.cache"
 
 tar \
     --exclude='.git' \

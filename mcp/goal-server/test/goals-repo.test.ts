@@ -75,6 +75,21 @@ describe("GoalsRepo.create", () => {
     expect(() => repo.create({ session_id: "s1", objective: "x", token_budget: 1000, budget_profile: "quick" })).toThrow(/mutually exclusive/);
   });
 
+  it("rejects malformed raw token budgets", () => {
+    const repo = freshRepo();
+    expect(() => repo.create({ session_id: "s1", objective: "x", token_budget: "1000" as never, budget_profile: null })).toThrow(/positive integer/);
+    expect(() => repo.create({ session_id: "s2", objective: "x", token_budget: 1.5, budget_profile: null })).toThrow(/positive integer/);
+    expect(() => repo.create({ session_id: "s3", objective: "x", token_budget: 0, budget_profile: null })).toThrow(/positive integer/);
+  });
+
+  it("rejects malformed create input fields before writing", () => {
+    const repo = freshRepo();
+    expect(() => repo.create({ session_id: "", objective: "x", token_budget: null, budget_profile: null })).toThrow(/session_id is required/);
+    expect(() => repo.create({ session_id: "s1", objective: 123 as never, token_budget: null, budget_profile: null })).toThrow(/objective must be 1-4000/);
+    expect(() => repo.create({ session_id: "s2", objective: "   ", token_budget: null, budget_profile: null })).toThrow(/objective must be 1-4000/);
+    expect(() => repo.create({ session_id: "s3", objective: "x", token_budget: null, budget_profile: "huge" as never })).toThrow(/budget_profile must be one of/);
+  });
+
   it("rejects creation when active goal exists", () => {
     const repo = freshRepo();
     repo.create({ session_id: "s1", objective: "first", token_budget: null, budget_profile: null });
