@@ -111,7 +111,7 @@ sequenceDiagram
 
 **Token accounting.** `scripts/post-tool-batch.sh` reads the session transcript JSONL after every tool batch, finds assistant messages past the last cursor, and sums `input_tokens + cache_creation_input_tokens + output_tokens`. Cache-read tokens are excluded. Parent-worker counts go to `tokens_used`; subagent counts go to `subagent_tokens` through per-agent cursors stored in `subagent_token_cursors`.
 
-**Completion — dual path.** The worker can self-audit and call `update_goal status:complete` (`completed_by: "self_update"`). The continuation prompt also instructs the worker to dispatch the `claude-goal:goal-evaluator` subagent before declaring done. The evaluator runs in a fresh context with `Bash + Read + jq + sqlite3` — it reads the objective from the DB, queries real state with tools, and returns `{"verdict":"complete"|"incomplete"|"unverifiable"}`. On `complete`, the worker calls `update_goal completed_by:"evaluator"`, which logs a distinct `goal_completed_by_evaluator` event. The two paths coexist; evaluator is preferred, self-audit is the fallback.
+**Completion — dual path.** The worker can self-audit and call `update_goal status:complete` (`completed_by: "self_update"`). The continuation prompt also instructs the worker to dispatch the `claude-goal:goal-evaluator` subagent before declaring done. The evaluator runs in a fresh context with `Bash + Read + jq + sqlite3` — it reads the objective from the DB, queries real state with tools, and returns `{"verdict":"complete"|"incomplete"|"unverifiable"}`. On `complete`, the worker calls `update_goal completed_by:"evaluator"`, which logs a distinct `goal_completed_by_evaluator` event. Evaluator completion can also close a goal paused by `accounting_error` after `/compact`; self-update completion cannot bypass that accounting pause. The two paths coexist; evaluator is preferred, self-audit is the fallback.
 
 **Blocked state.** If the same blocker repeats across at least three consecutive continuation turns and no meaningful progress is possible without user input or an external-state change, the worker can call `update_goal status:blocked blocked_reason:"..."`. Blocked goals stop auto-continuing, stay visible in status/history, and can be restarted with `/goal-resume`.
 
@@ -157,7 +157,7 @@ Updates land via `/plugin update claude-goal` once new versions are tagged.
 
 ```bash
 mkdir -p ~/.claude/plugins/local/claude-goal
-tar -xzf claude-goal-v0.2.2.tar.gz -C ~/.claude/plugins/local/claude-goal
+tar -xzf claude-goal-v0.2.3.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 

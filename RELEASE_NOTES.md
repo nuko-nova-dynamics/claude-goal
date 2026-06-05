@@ -1,3 +1,31 @@
+# claude-goal v0.2.3
+
+**Evaluator-completion fix for accounting-error pauses.**
+
+This patch fixes the lifecycle edge case where a goal could finish successfully, have the evaluator verify it, then remain stuck in `paused (accounting_error)` because `update_goal status:complete` only accepted `active` goals.
+
+## Fixed
+
+- `update_goal status:complete completed_by:"evaluator"` can now close a goal paused with `paused_reason='accounting_error'`.
+- Completion clears stale `paused_reason` and `accounting_uncertain` state so `/goal-status` and `/goal-history` do not keep reporting a resolved accounting warning.
+- Ordinary `completed_by:"self_update"` completion still cannot bypass an accounting-error pause, and `budget_limited` goals still require `/goal-extend --add-tokens`.
+
+## Migration notes
+
+- No SQLite schema change from v0.2.2.
+- Existing stuck goals can be completed after updating/reloading the plugin if the evaluator has already verified completion.
+
+## Verified locally
+
+- `npm --prefix mcp/goal-server test` - 87 passed
+- `npm --prefix mcp/goal-server run build`
+- `bats $(find tests -name '*.bats' | sort)` - 140 passed
+- `npm --prefix docs run build`
+- `git diff --check`
+- Release tarball SHA-256: `8fe7fedcd52012e10d1ced36f0cfc456664c6082142788c995486a084949a7d3`
+
+---
+
 # claude-goal v0.2.2
 
 **Marketplace-install packaging fix.**

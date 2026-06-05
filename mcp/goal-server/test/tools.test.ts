@@ -167,6 +167,30 @@ describe("update_goal tool", () => {
     expect(events.event_type).toBe("goal_completed_by_evaluator");
   });
 
+  it("allows evaluator completion from accounting_error pause", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    const goal = repo.getBySession("s1")!;
+    repo.pause("s1", goal.goal_id, "accounting_error");
+
+    const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete", completed_by: "evaluator" });
+
+    expect(out.goal!.status).toBe("complete");
+    expect(out.goal!.paused_reason).toBeNull();
+  });
+
+  it("rejects self-update completion from accounting_error pause", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    const goal = repo.getBySession("s1")!;
+    repo.pause("s1", goal.goal_id, "accounting_error");
+
+    const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete" });
+
+    expect(out.error).toMatch(/accounting_error.*evaluator/);
+    expect(repo.getBySession("s1")!.status).toBe("paused");
+  });
+
   it("rejects unknown completed_by values", () => {
     const repo = freshRepo();
     handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });

@@ -161,6 +161,40 @@ describe("GoalsRepo.markComplete", () => {
     expect(after.time_used_seconds).toBeGreaterThanOrEqual(2);
   });
 
+  it("allows evaluator completion from accounting_error pause", () => {
+    const repo = freshRepo();
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
+    repo.pause("s1", g.goal_id, "accounting_error");
+    repo["db"].prepare("UPDATE goals SET accounting_uncertain = 1 WHERE session_id = 's1'").run();
+
+    repo.markComplete("s1", g.goal_id, "evaluator");
+
+    const after = repo.getBySession("s1")!;
+    expect(after.status).toBe("complete");
+    expect(after.paused_reason).toBeNull();
+    expect(after.accounting_uncertain).toBe(0);
+
+    const event = repo["db"]
+      .prepare("SELECT event_type, status_before, status_after, payload_json FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1")
+      .get() as { event_type: string; status_before: string; status_after: string; payload_json: string };
+    expect(event.event_type).toBe("goal_completed_by_evaluator");
+    expect(event.status_before).toBe("paused");
+    expect(event.status_after).toBe("complete");
+    expect(JSON.parse(event.payload_json)).toMatchObject({
+      completed_by: "evaluator",
+      paused_reason: "accounting_error",
+    });
+  });
+
+  it("rejects self-update completion from accounting_error pause", () => {
+    const repo = freshRepo();
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
+    repo.pause("s1", g.goal_id, "accounting_error");
+
+    expect(() => repo.markComplete("s1", g.goal_id, "self_update")).toThrow(/accounting_error.*evaluator/);
+    expect(repo.getBySession("s1")!.status).toBe("paused");
+  });
+
   it("rejects completing an abandoned goal", () => {
     const repo = freshRepo();
     const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
