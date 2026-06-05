@@ -1,3 +1,26 @@
+# claude-goal v0.2.2
+
+**Marketplace-install packaging fix.**
+
+This patch exists because Claude Code marketplace plugin sources clone git repositories directly. The v0.2.1 source commit was valid for development and tarball releases, but marketplace installs cloned it without the built MCP `dist/` directory or bundled runtime dependencies, so the `goal` MCP server did not connect after `/reload-plugins`.
+
+## Fixed
+
+- Published an installable marketplace artifact branch that contains the built MCP server and pruned runtime dependencies.
+- Bumped the plugin version to `0.2.2` so users with the broken marketplace-installed `0.2.1` cache can receive the fixed artifact through `/plugin update`.
+- No goal runtime behavior or SQLite schema changes from v0.2.1.
+
+## Verified locally
+
+- `npm --prefix mcp/goal-server test`
+- `npm --prefix mcp/goal-server run build`
+- `bats $(find tests -name '*.bats' | sort)`
+- `npm --prefix docs run build`
+- `claude plugin validate` against the marketplace artifact clone
+- Marketplace artifact clone smoke-loaded the built MCP modules
+
+---
+
 # claude-goal v0.2.1
 
 **Runtime hardening for smart budget goal creation.**
