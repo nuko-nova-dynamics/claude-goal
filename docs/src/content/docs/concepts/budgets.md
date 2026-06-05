@@ -55,24 +55,22 @@ This matters for sizing: once a long-running goal has warmed the cache, per-turn
 
 ### Raising a budget mid-run
 
-When a goal pauses with `budget_limited`, you have two practical options:
+When a goal reaches `status=budget_limited`, you have two practical options:
 
-**Add turns, accept overrun.** If you trust the model to wrap up:
+**Raise the token budget and resume.** If progress is still useful and the cap was simply too small:
 
 ```
-/goal-extend --add-continuations 50
+/goal-extend --add-tokens 1000000
 ```
 
-This adds turns and resumes, but **does not** raise the token budget. The next Stop hook will re-detect over-budget and re-pause unless you also accept that the goal will continue burning tokens past the cap.
+This adds 1M tokens to the existing budget, resets the one-shot budget-limit prompt, and resumes the goal.
 
-**Start a fresh goal with a larger budget.** The clean reset:
+**Start a fresh goal with a larger budget.** Use this when the objective needs to be narrowed or the current run is looping:
 
 ```
 /goal-abandon
 /goal-start "<refined objective>" --budget 5000000
 ```
-
-A "raise the token budget" extender is on the roadmap; for now, abandon + restart is the pattern when you want a real cap raise.
 
 ## Continuation cap
 
@@ -115,15 +113,16 @@ Per-subagent cursors live in `subagent_token_cursors` (one row per `agent_id`). 
 stateDiagram-v2
     [*] --> active
     active --> complete: update_goal status=complete
+    active --> blocked: update_goal status=blocked
     active --> abandoned: /goal-abandon
     active --> paused: /goal-pause (user)
     active --> budget_limited: budget breach
     active --> paused: continuation_cap / wall_clock_cap
-    active --> degraded: hook error
+    active --> paused: hook error (degraded)
 
     paused --> active: /goal-resume or /goal-extend
-    budget_limited --> active: /goal-extend --add-continuations
-    degraded --> active: /goal-reconcile
+    blocked --> active: /goal-resume
+    budget_limited --> active: /goal-extend --add-tokens
     complete --> [*]
     abandoned --> [*]
 ```

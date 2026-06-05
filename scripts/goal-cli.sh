@@ -32,6 +32,7 @@ SESSION_ID="${CLAUDE_SESSION_ID:-}"
 FORMAT="text"
 ADD_CONT=""
 ADD_HOURS=""
+ADD_TOKENS=""
 ACCEPT_RESET=0
 CLEANUP_ACTION=""
 CLEANUP_HOURS=""
@@ -49,6 +50,8 @@ while (( $# > 0 )); do
     --add-continuations) ADD_CONT="$2"; shift 2 ;;
     --add-hours=*) ADD_HOURS="${1#*=}"; shift ;;
     --add-hours) ADD_HOURS="$2"; shift 2 ;;
+    --add-tokens=*) ADD_TOKENS="${1#*=}"; shift ;;
+    --add-tokens) ADD_TOKENS="$2"; shift 2 ;;
     --accept-reset) ACCEPT_RESET=1; shift ;;
     --list) CLEANUP_ACTION="list"; shift ;;
     --delete) CLEANUP_ACTION="delete"; shift ;;
@@ -89,6 +92,10 @@ SESSION_ID_ESC=$(sql_escape "${SESSION_ID:-}")
 sql() { sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "$@"; }
 # macOS-compatible millisecond timestamp
 ms_now() { python3 -c "import time; print(int(time.time()*1000))"; }
+is_positive_int() { [[ "$1" =~ ^[1-9][0-9]*$ ]]; }
+sql_change_count() {
+  printf '%s\n' "$1" | awk '/^[[:space:]]*[0-9]+[[:space:]]*$/ { value=$1 } END { if (value != "") print value; else print "0" }'
+}
 
 case "$SUBCMD" in
   status)
@@ -128,22 +135,24 @@ case "$SUBCMD" in
     echo "goal paused"
     ;;
   resume)
-    ROW=$(sql -json "SELECT goal_id, paused_reason FROM goals WHERE session_id = '$SESSION_ID_ESC' AND status = 'paused';")
-    [[ -z "$ROW" || "$ROW" == "[]" ]] && { echo "no paused goal to resume"; exit 2; }
+    ROW=$(sql -json "SELECT goal_id, status, paused_reason FROM goals WHERE session_id = '$SESSION_ID_ESC' AND status IN ('paused','blocked');")
+    [[ -z "$ROW" || "$ROW" == "[]" ]] && { echo "no paused or blocked goal to resume"; exit 2; }
+    STATUS_BEFORE=$(echo "$ROW" | jq -r '.[0].status')
     PAUSED_REASON=$(echo "$ROW" | jq -r '.[0].paused_reason')
     GOAL_ID=$(echo "$ROW" | jq -r '.[0].goal_id')
-    if [[ "$PAUSED_REASON" != "user" && "$PAUSED_REASON" != "degraded" ]]; then
+    if [[ "$STATUS_BEFORE" = "paused" && "$PAUSED_REASON" != "user" && "$PAUSED_REASON" != "degraded" ]]; then
       echo "goal is paused due to '$PAUSED_REASON'; use /goal-extend or /goal-reconcile" >&2
       exit 3
     fi
     GOAL_ID_ESC=$(sql_escape "$GOAL_ID")
+    STATUS_BEFORE_ESC=$(sql_escape "$STATUS_BEFORE")
     NOW=$(ms_now)
     sql "BEGIN IMMEDIATE;
          UPDATE goals SET status='active', paused_reason=NULL,
            resume_at_ms = ${NOW}, version = version + 1, updated_at_ms = ${NOW}
          WHERE session_id = '$SESSION_ID_ESC' AND goal_id = '$GOAL_ID_ESC';
          INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, pid, created_at_ms)
-         VALUES ('$SESSION_ID_ESC','$GOAL_ID_ESC','goal-cli','goal_resumed','paused','active',$$,${NOW});
+         VALUES ('$SESSION_ID_ESC','$GOAL_ID_ESC','goal-cli','goal_resumed','$STATUS_BEFORE_ESC','active',$$,${NOW});
          COMMIT;"
     echo "goal resumed"
     ;;
@@ -166,21 +175,68 @@ case "$SUBCMD" in
     echo "goal abandoned"
     ;;
   extend)
+    EXTEND_COUNT=0
+    [[ -n "${ADD_CONT}" ]] && EXTEND_COUNT=$((EXTEND_COUNT + 1))
+    [[ -n "${ADD_HOURS}" ]] && EXTEND_COUNT=$((EXTEND_COUNT + 1))
+    [[ -n "${ADD_TOKENS}" ]] && EXTEND_COUNT=$((EXTEND_COUNT + 1))
+    if [[ "$EXTEND_COUNT" -ne 1 ]]; then
+      echo "error: specify exactly one of --add-continuations N, --add-hours N, or --add-tokens N" >&2
+      exit 1
+    fi
     if [[ -n "${ADD_CONT}" ]]; then
-      sql "UPDATE goals SET continuations_remaining = continuations_remaining + ${ADD_CONT},
+      if ! is_positive_int "$ADD_CONT"; then
+        echo "error: --add-continuations must be a positive integer" >&2
+        exit 1
+      fi
+      UPDATE_RESULT=$(sql "UPDATE goals SET continuations_remaining = continuations_remaining + ${ADD_CONT},
              status = 'active', paused_reason = NULL, resume_at_ms = $(ms_now),
              version = version + 1
-           WHERE session_id = '$SESSION_ID_ESC' AND status = 'paused' AND paused_reason = 'continuation_cap';"
+           WHERE session_id = '$SESSION_ID_ESC' AND status = 'paused' AND paused_reason = 'continuation_cap';
+           SELECT changes();")
+      if [[ "$(sql_change_count "$UPDATE_RESULT")" != "1" ]]; then
+        echo "no continuation-cap paused goal to extend" >&2
+        exit 2
+      fi
       echo "added ${ADD_CONT} continuations; resumed"
     elif [[ -n "${ADD_HOURS}" ]]; then
+      if ! is_positive_int "$ADD_HOURS"; then
+        echo "error: --add-hours must be a positive integer" >&2
+        exit 1
+      fi
       ADD_SEC=$((ADD_HOURS * 3600))
-      sql "UPDATE goals SET max_wall_clock_seconds = max_wall_clock_seconds + ${ADD_SEC},
+      UPDATE_RESULT=$(sql "UPDATE goals SET max_wall_clock_seconds = max_wall_clock_seconds + ${ADD_SEC},
              status = 'active', paused_reason = NULL, resume_at_ms = $(ms_now),
              version = version + 1
-           WHERE session_id = '$SESSION_ID_ESC' AND status = 'paused' AND paused_reason = 'wall_clock_cap';"
+           WHERE session_id = '$SESSION_ID_ESC' AND status = 'paused' AND paused_reason = 'wall_clock_cap';
+           SELECT changes();")
+      if [[ "$(sql_change_count "$UPDATE_RESULT")" != "1" ]]; then
+        echo "no wall-clock-cap paused goal to extend" >&2
+        exit 2
+      fi
       echo "added ${ADD_HOURS}h wall clock; resumed"
+    elif [[ -n "${ADD_TOKENS}" ]]; then
+      if ! is_positive_int "$ADD_TOKENS"; then
+        echo "error: --add-tokens must be a positive integer" >&2
+        exit 1
+      fi
+      NOW=$(ms_now)
+      UPDATE_RESULT=$(sql "UPDATE goals SET
+             token_budget = COALESCE(token_budget, tokens_used + subagent_tokens) + ${ADD_TOKENS},
+             status = CASE WHEN status = 'budget_limited' THEN 'active' ELSE status END,
+             paused_reason = CASE WHEN status = 'budget_limited' THEN NULL ELSE paused_reason END,
+             resume_at_ms = CASE WHEN status = 'budget_limited' THEN ${NOW} ELSE resume_at_ms END,
+             budget_limit_reported = CASE WHEN status = 'budget_limited' THEN 0 ELSE budget_limit_reported END,
+             version = version + 1,
+             updated_at_ms = ${NOW}
+           WHERE session_id = '$SESSION_ID_ESC' AND status IN ('active','budget_limited');
+           SELECT changes();")
+      if [[ "$(sql_change_count "$UPDATE_RESULT")" != "1" ]]; then
+        echo "no active or budget-limited goal to extend" >&2
+        exit 2
+      fi
+      echo "added ${ADD_TOKENS} token budget; resumed if budget-limited"
     else
-      echo "error: must specify --add-continuations N or --add-hours N" >&2
+      echo "error: specify exactly one of --add-continuations N, --add-hours N, or --add-tokens N" >&2
       exit 1
     fi
     ;;
@@ -283,7 +339,7 @@ case "$SUBCMD" in
     if [[ -w "$DATA_DIR" ]]; then add_check plugin_data_writable pass "$DATA_DIR"; else add_check plugin_data_writable fail "$DATA_DIR not writable"; fi
     # Schema version
     SV=$(sqlite3 "$DB_PATH" "SELECT version FROM schema_version;" 2>/dev/null || echo "")
-    if [[ "$SV" = "2" ]]; then add_check schema_version pass "2"; else add_check schema_version fail "got '$SV'"; fi
+    if [[ "$SV" = "3" ]]; then add_check schema_version pass "3"; else add_check schema_version fail "got '$SV'"; fi
     # Dependencies
     for dep in node jq sqlite3 envsubst; do
       if command -v "$dep" >/dev/null 2>&1; then add_check "${dep}_present" pass; else add_check "${dep}_present" fail "$dep not found in PATH"; fi
@@ -299,7 +355,7 @@ case "$SUBCMD" in
     STALE=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM continuation_leases WHERE expires_at_ms < ${NOW_MS};" 2>/dev/null || echo 0)
     add_check stale_leases pass "$STALE stale"
     # Active goals (informational)
-    ACTIVE=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goals WHERE status IN ('active','budget_limited');" 2>/dev/null || echo 0)
+    ACTIVE=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goals WHERE status IN ('active','blocked','budget_limited');" 2>/dev/null || echo 0)
     add_check active_goals pass "$ACTIVE active"
     # disableAllHooks: hard fail — without hooks, the entire continuation loop is dead.
     # Check user and project settings; managed-policy settings (system-wide) are skipped

@@ -37,6 +37,7 @@ For a `--plugin-dir` install, it's whatever you passed to `--plugin-dir` followe
 | `◎ goal paused (user)` | User-paused via `/goal-pause` |
 | `◎ goal paused (continuation_cap)` | Out of continuations |
 | `◎ goal paused (wall_clock_cap)` | Wall-clock cap reached |
+| `◎ goal blocked` | `status=blocked`; resume when the blocker is resolved |
 | `◎ goal unmet (budget exhausted)` | `status=budget_limited` |
 | `◎ goal achieved` | `status=complete` |
 | `◎ goal abandoned` | `status=abandoned` |

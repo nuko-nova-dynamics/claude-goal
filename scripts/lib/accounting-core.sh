@@ -298,7 +298,7 @@ account_subagent_inline() {
   local total_tokens=$((tokens_used + new_subagent_tokens))
 
   local budget_clause=""
-  if [[ "$current_status" != "complete" && -n "$token_budget" ]] && (( total_tokens >= token_budget )); then
+  if [[ "$current_status" != "complete" && "$current_status" != "blocked" && -n "$token_budget" ]] && (( total_tokens >= token_budget )); then
     budget_clause=",
       status = 'budget_limited',
       time_used_seconds = time_used_seconds + COALESCE(($now - resume_at_ms) / 1000, 0),
@@ -308,6 +308,8 @@ account_subagent_inline() {
   local status_guard="'active','budget_limited'"
   if [[ "$current_status" == "complete" ]]; then
     status_guard="'active','budget_limited','complete'"
+  elif [[ "$current_status" == "blocked" ]]; then
+    status_guard="'active','budget_limited','blocked'"
   fi
 
   local TX_RESULT
@@ -482,7 +484,7 @@ account_advance_inline() {
   # Atomic budget transition: flip to budget_limited in the same UPDATE.
   local budget_clause=""
   local new_total_tokens=$((new_tokens_used + subagent_tokens))
-  if [[ "$current_status" != "complete" && -n "$token_budget" ]] && (( new_total_tokens >= token_budget )); then
+  if [[ "$current_status" != "complete" && "$current_status" != "blocked" && -n "$token_budget" ]] && (( new_total_tokens >= token_budget )); then
     budget_clause=",
       status = 'budget_limited',
       time_used_seconds = time_used_seconds + COALESCE(($now - resume_at_ms) / 1000, 0),
@@ -492,6 +494,8 @@ account_advance_inline() {
   local status_guard="'active','budget_limited'"
   if [[ "$current_status" == "complete" ]]; then
     status_guard="'active','budget_limited','complete'"
+  elif [[ "$current_status" == "blocked" ]]; then
+    status_guard="'active','budget_limited','blocked'"
   fi
 
   # Single sqlite3 invocation: BEGIN IMMEDIATE ... COMMIT.

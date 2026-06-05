@@ -222,6 +222,11 @@ case "$STATUS" in
     run_f5_final_turn_accounting
     exit 0
     ;;
+  blocked)
+    log_info "stop: goal blocked; running F5 final-turn accounting"
+    run_f5_final_turn_accounting
+    exit 0
+    ;;
   abandoned|paused)
     exit 0
     ;;

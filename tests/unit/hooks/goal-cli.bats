@@ -58,9 +58,56 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   [ "$status" -eq 3 ]
 }
 
+@test "resume restarts blocked goal" {
+  NOW=$(ms_now)
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'blocked', $NOW, $NOW);"
+
+  run "$CLI" resume
+  [ "$status" -eq 0 ]
+
+  STATUS=$(sqlite3 "$DB_PATH" "SELECT status, paused_reason IS NULL, resume_at_ms IS NOT NULL FROM goals WHERE session_id='test-session';")
+  [ "$STATUS" = "active|1|1" ]
+  EVENT=$(sqlite3 "$DB_PATH" "SELECT status_before || '>' || status_after FROM goal_events WHERE event_type='goal_resumed' ORDER BY id DESC LIMIT 1;")
+  [ "$EVENT" = "blocked>active" ]
+}
+
 @test "extend without flags exits 1" {
   run "$CLI" extend
   [ "$status" -eq 1 ]
+}
+
+@test "extend rejects non-integer continuation input before SQL" {
+  NOW=$(ms_now)
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, paused_reason, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'paused', 'continuation_cap', $NOW, $NOW);"
+
+  run "$CLI" extend --add-continuations "1; DROP TABLE goals;"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--add-continuations must be a positive integer"* ]]
+
+  TABLE_EXISTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='goals';")
+  [ "$TABLE_EXISTS" = "1" ]
+}
+
+@test "extend --add-tokens resumes budget_limited goal" {
+  NOW=$(ms_now)
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, tokens_used, subagent_tokens, budget_limit_reported, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'budget_limited', 1000, 900, 100, 1, $NOW, $NOW);"
+
+  run "$CLI" extend --add-tokens 500
+  [ "$status" -eq 0 ]
+
+  ROW=$(sqlite3 "$DB_PATH" "SELECT status || '|' || token_budget || '|' || budget_limit_reported || '|' || (resume_at_ms IS NOT NULL) FROM goals WHERE session_id='test-session';")
+  [ "$ROW" = "active|1500|0|1" ]
+}
+
+@test "extend --add-tokens sets budget on active unbudgeted goal" {
+  NOW=$(ms_now)
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, tokens_used, subagent_tokens, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'active', 900, 100, $NOW, $NOW);"
+
+  run "$CLI" extend --add-tokens 500
+  [ "$status" -eq 0 ]
+
+  BUDGET=$(sqlite3 "$DB_PATH" "SELECT token_budget FROM goals WHERE session_id='test-session';")
+  [ "$BUDGET" = "1500" ]
 }
 
 @test "reconcile --accept-reset clears flag and resumes accounting_error pause" {

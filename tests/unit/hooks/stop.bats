@@ -60,6 +60,16 @@ teardown() {
   [ -z "$output" ]
 }
 
+@test "stop hook is silent when status=blocked" {
+  sqlite3 "$DB_PATH" "UPDATE goals SET status='blocked' WHERE session_id='s1';"
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"stop_hook_active\":false}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/stop.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals WHERE session_id='s1';")
+  [ "$REM" = "50" ]
+}
+
 @test "stop hook recursion-guard short-circuits when stop_hook_active=true and no new assistant turn" {
   cat > "$TRANSCRIPT" <<'EOF'
 {"type":"assistant","uuid":"u1","message":{"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"output_tokens":1},"content":[{"type":"text","text":"done for now"}]}}

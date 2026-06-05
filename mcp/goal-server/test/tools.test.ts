@@ -69,7 +69,7 @@ describe("update_goal tool", () => {
     const repo = freshRepo();
     handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
     const out = handleUpdateGoal(repo, { session_id: "s1", status: "paused" as never });
-    expect(out.error).toMatch(/only.*complete/i);
+    expect(out.error).toMatch(/only.*complete.*blocked/i);
   });
 
   it("marks complete on valid call", () => {
@@ -117,5 +117,48 @@ describe("update_goal tool", () => {
 
     expect(out.error).toMatch(/cannot mark complete from status 'budget_limited'/);
     expect(repo.getBySession("s1")!.status).toBe("budget_limited");
+  });
+
+  it("marks blocked on valid call and records reason", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    const out = handleUpdateGoal(repo, {
+      session_id: "s1",
+      status: "blocked",
+      blocked_reason: "requires credentials from user",
+    });
+
+    expect(out.goal!.status).toBe("blocked");
+    const event = repo["db"]
+      .prepare("SELECT event_type, payload_json FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1")
+      .get() as { event_type: string; payload_json: string };
+    expect(event.event_type).toBe("goal_blocked");
+    expect(JSON.parse(event.payload_json).reason).toBe("requires credentials from user");
+  });
+
+  it("rejects completed_by when status is blocked", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    const out = handleUpdateGoal(repo, {
+      session_id: "s1",
+      status: "blocked",
+      completed_by: "evaluator",
+    });
+
+    expect(out.error).toMatch(/completed_by.*only valid.*complete/);
+    expect(repo.getBySession("s1")!.status).toBe("active");
+  });
+
+  it("rejects overlong blocked_reason", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    const out = handleUpdateGoal(repo, {
+      session_id: "s1",
+      status: "blocked",
+      blocked_reason: "x".repeat(1001),
+    });
+
+    expect(out.error).toMatch(/1000 characters/);
+    expect(repo.getBySession("s1")!.status).toBe("active");
   });
 });

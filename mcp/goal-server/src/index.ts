@@ -43,7 +43,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "create_goal",
-      description: "Create a new goal. Only call this when the user explicitly invokes /goal-start — do not infer goals from ordinary tasks. Fails if a goal already exists in 'active' or 'budget_limited' status; replaces any 'complete', 'paused', or 'abandoned' prior goal.",
+      description: "Create a new goal. Only call this when the user explicitly invokes /goal-start — do not infer goals from ordinary tasks. Fails if a goal already exists in 'active', 'paused', 'blocked', or 'budget_limited' status; replaces any 'complete' or 'abandoned' prior goal.",
       inputSchema: {
         type: "object",
         required: envSessionId ? ["objective"] : ["session_id", "objective"],
@@ -57,7 +57,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "update_goal",
-      description: "Update the existing goal. Use this tool only to mark the goal achieved. Set status to 'complete' only when the objective has actually been achieved and no required work remains. Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work. The optional 'completed_by' field distinguishes worker self-audit completion from evaluator-confirmed completion (after the claude-goal:goal-evaluator subagent returns verdict 'complete', send 'evaluator'; worker-only fallback omits it or sends 'self_update').",
+      description: "Update the existing goal. Use this tool only to mark the goal achieved or genuinely blocked. Set status to 'complete' only when the objective has actually been achieved and no required work remains. Set status to 'blocked' only after the same blocker has repeated across at least three consecutive continuation turns and no meaningful progress is possible without user input or an external-state change. Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work. The optional 'completed_by' field distinguishes worker self-audit completion from evaluator-confirmed completion (after the claude-goal:goal-evaluator subagent returns verdict 'complete', send 'evaluator'; worker-only fallback omits it or sends 'self_update').",
       inputSchema: {
         type: "object",
         required: envSessionId ? ["status"] : ["session_id", "status"],
@@ -65,8 +65,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           session_id: { type: "string" },
           goal_id: { type: ["string", "null"] },
-          status: { type: "string", enum: ["complete"] },
+          status: { type: "string", enum: ["complete", "blocked"] },
           completed_by: { type: "string", enum: ["self_update", "evaluator"] },
+          blocked_reason: { type: ["string", "null"], maxLength: 1000 },
         },
       },
     },
@@ -86,7 +87,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       result = handleCreateGoal(repo, args as { session_id: string; objective: string; token_budget: number | null });
       break;
     case "update_goal":
-      result = handleUpdateGoal(repo, args as { session_id: string; goal_id?: string; status: "complete"; completed_by?: "self_update" | "evaluator" });
+      result = handleUpdateGoal(repo, args as { session_id: string; goal_id?: string; status: "complete" | "blocked"; completed_by?: "self_update" | "evaluator"; blocked_reason?: string | null });
       break;
     default:
       throw new Error(`unknown tool: ${req.params.name}`);

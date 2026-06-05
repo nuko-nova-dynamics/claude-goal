@@ -8,16 +8,17 @@ describe("db migrations", () => {
   let dbPath: string;
   const initialMigration = () => readFileSync(join(process.cwd(), "src/migrations/001_initial.sql"), "utf8");
   const subagentMigration = () => readFileSync(join(process.cwd(), "src/migrations/002_subagent_tokens.sql"), "utf8");
+  const blockedMigration = () => readFileSync(join(process.cwd(), "src/migrations/003_blocked_status.sql"), "utf8");
 
   beforeEach(() => {
     const dir = mkdtempSync(join(tmpdir(), "claude-goal-test-"));
     dbPath = join(dir, "goals.db");
   });
 
-  it("creates schema_version=2 on fresh DB", () => {
+  it("creates schema_version=3 on fresh DB", () => {
     const db = openDb(dbPath);
     runMigrations(db);
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(getSchemaVersion(db)).toBe(3);
   });
 
   it("creates goals, continuation_leases, goal_events, subagent_token_cursors tables", () => {
@@ -36,30 +37,34 @@ describe("db migrations", () => {
     const db = openDb(dbPath);
     runMigrations(db);
     runMigrations(db);
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(getSchemaVersion(db)).toBe(3);
   });
 
-  it("migrates an existing v1 database to v2", () => {
+  it("migrates an existing v1 database to v3", () => {
     const db = openDb(dbPath);
     db.exec(initialMigration());
 
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(getSchemaVersion(db)).toBe(3);
     const subagentColumn = db.prepare("SELECT name FROM pragma_table_info('goals') WHERE name = 'subagent_tokens'").get();
     expect(subagentColumn).toBeTruthy();
     const cursorTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='subagent_token_cursors'").get();
     expect(cursorTable).toBeTruthy();
+    expect(() => db.prepare(`
+      INSERT INTO goals (session_id, goal_id, objective, status, created_at_ms, updated_at_ms)
+      VALUES ('s-blocked', 'g-blocked', 'x', 'blocked', 1, 1)
+    `).run()).not.toThrow();
   });
 
-  it("is idempotent for an existing v2 database", () => {
+  it("is idempotent for an existing v3 database", () => {
     const db = openDb(dbPath);
     runMigrations(db);
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(getSchemaVersion(db)).toBe(3);
 
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(getSchemaVersion(db)).toBe(3);
   });
 
   it("rejects DB ahead of plugin version", () => {
@@ -81,6 +86,7 @@ CREATE TABLE subagent_token_cursors (
 INSERT INTO missing_table VALUES (1);
 UPDATE schema_version SET version = 2;
 `);
+    writeFileSync(join(migrationsDir, "003_blocked_status.sql"), blockedMigration());
 
     expect(() => runMigrations(db, migrationsDir)).toThrow();
     expect(getSchemaVersion(db)).toBe(1);
@@ -90,18 +96,18 @@ UPDATE schema_version SET version = 2;
     writeFileSync(join(migrationsDir, "002_subagent_tokens.sql"), subagentMigration());
 
     runMigrations(db, migrationsDir);
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(getSchemaVersion(db)).toBe(3);
     expect(db.prepare("SELECT name FROM pragma_table_info('goals') WHERE name = 'subagent_tokens'").get()).toBeTruthy();
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='subagent_token_cursors'").get()).toBeTruthy();
   });
 
-  it("rejects a migration set with 001 and 003 but missing expected 002", () => {
+  it("rejects a migration set missing expected 003", () => {
     const db = openDb(dbPath);
     const migrationsDir = mkdtempSync(join(tmpdir(), "claude-goal-migrations-"));
     writeFileSync(join(migrationsDir, "001_initial.sql"), initialMigration());
-    writeFileSync(join(migrationsDir, "003_future.sql"), "UPDATE schema_version SET version = 3;");
+    writeFileSync(join(migrationsDir, "002_subagent_tokens.sql"), subagentMigration());
 
-    expect(() => runMigrations(db, migrationsDir)).toThrow(/db schema version 1 after migrations; expected 2/);
-    expect(getSchemaVersion(db)).toBe(1);
+    expect(() => runMigrations(db, migrationsDir)).toThrow(/db schema version 2 after migrations; expected 3/);
+    expect(getSchemaVersion(db)).toBe(2);
   });
 });

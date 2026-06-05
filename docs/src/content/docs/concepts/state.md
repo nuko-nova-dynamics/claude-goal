@@ -20,45 +20,55 @@ The DB runs in **WAL mode** so concurrent reads (from `/goal-status`, `/goal-his
 ## Schema
 
 ```sql
--- v1: initial schema
 CREATE TABLE goals (
-  id                       INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id               TEXT NOT NULL,
-  objective                TEXT NOT NULL,
-  status                   TEXT NOT NULL,
-  paused_reason            TEXT,
-  token_budget             INTEGER,
-  tokens_used              INTEGER NOT NULL DEFAULT 0,
-  continuations_total      INTEGER NOT NULL,
-  continuations_remaining  INTEGER NOT NULL,
-  wall_clock_cap_seconds   INTEGER NOT NULL,
-  started_at               INTEGER NOT NULL,
-  last_advanced_at         INTEGER,
-  completed_at             INTEGER,
-  completed_by             TEXT,
-  accounting_uncertain     INTEGER NOT NULL DEFAULT 0,
-  transcript_cursor        INTEGER NOT NULL DEFAULT 0,
-  version                  INTEGER NOT NULL DEFAULT 1
+  session_id                  TEXT PRIMARY KEY NOT NULL,
+  goal_id                     TEXT NOT NULL,
+  objective                   TEXT NOT NULL CHECK(length(objective) BETWEEN 1 AND 4000),
+  status                      TEXT NOT NULL CHECK(status IN (
+                                'active','paused','blocked','budget_limited','complete','abandoned'
+                              )),
+  paused_reason               TEXT CHECK(paused_reason IN (
+                                'user','continuation_cap','wall_clock_cap','cleared',
+                                'degraded','accounting_error'
+                              ) OR paused_reason IS NULL),
+  token_budget                INTEGER,
+  tokens_used                 INTEGER NOT NULL DEFAULT 0,
+  subagent_tokens             INTEGER NOT NULL DEFAULT 0,
+  time_used_seconds           INTEGER NOT NULL DEFAULT 0,
+  resume_at_ms                INTEGER,
+  last_accounted_byte_offset  INTEGER NOT NULL DEFAULT 0,
+  last_accounted_uuid         TEXT,
+  accounting_uncertain        INTEGER NOT NULL DEFAULT 0,
+  last_continuation_at_ms     INTEGER,
+  continuations_remaining     INTEGER NOT NULL DEFAULT 50,
+  max_wall_clock_seconds      INTEGER NOT NULL DEFAULT 14400,
+  budget_limit_reported       INTEGER NOT NULL DEFAULT 0,
+  version                     INTEGER NOT NULL DEFAULT 0,
+  created_at_ms               INTEGER NOT NULL,
+  updated_at_ms               INTEGER NOT NULL
 );
 
 CREATE TABLE goal_events (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  goal_id     INTEGER NOT NULL REFERENCES goals(id),
-  ts          INTEGER NOT NULL,
-  kind        TEXT NOT NULL,
-  payload     TEXT
+  session_id  TEXT NOT NULL,
+  goal_id     TEXT NOT NULL,
+  hook_name   TEXT,
+  event_type  TEXT NOT NULL,
+  payload_json TEXT,
+  created_at_ms INTEGER NOT NULL
 );
-
--- v2: per-subagent token attribution
-ALTER TABLE goals ADD COLUMN subagent_tokens INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE subagent_token_cursors (
-  goal_id     INTEGER NOT NULL REFERENCES goals(id),
+  session_id  TEXT NOT NULL,
+  goal_id     TEXT NOT NULL,
   agent_id    TEXT NOT NULL,
-  byte_offset INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (goal_id, agent_id)
+  tokens_used INTEGER NOT NULL DEFAULT 0,
+  last_accounted_byte_offset INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session_id, goal_id, agent_id)
 );
 ```
+
+Migration history: v1 initial schema, v2 per-subagent token attribution, v3 `blocked` status.
 
 The migration runner is in `mcp/goal-server/src/db.ts` — transactional, version-ordered, **downgrade-protected** (the runner refuses to run if `schema_version` exceeds the highest known migration).
 
@@ -67,13 +77,15 @@ The migration runner is in `mcp/goal-server/src/db.ts` — transactional, versio
 ```
 active           Currently driving turns
 paused           User-paused, continuation_cap, or wall_clock_cap
+blocked          Waiting for user input or external state after a repeated blocker
 budget_limited   Token budget hit
 complete         Successfully finished
 abandoned        User abandoned
-degraded         Catch-all error state — /goal-reconcile to recover
 ```
 
-A goal is exclusive per session — a unique partial index ensures only one `active`/`paused`/`budget_limited` goal can exist per `session_id` at a time. To start a new goal in the same session, abandon the prior one.
+`degraded` is a `paused_reason`, not a status. It means a hook caught an unexpected error and paused the goal; `/goal-resume` can restart it after you inspect the issue.
+
+A goal is exclusive per session because `goals.session_id` is the primary key. To start a new goal in the same session, the prior goal must be `complete` or `abandoned`; `active`, `paused`, `blocked`, and `budget_limited` goals must be resumed, extended, completed, or abandoned first.
 
 ## Optimistic concurrency
 
@@ -90,18 +102,15 @@ In practice this matters when the worker calls `update_goal status:complete` mid
 | `goal_created` | `/goal-start` succeeded |
 | `goal_completed_by_self_update` | Worker called `update_goal status:complete` directly |
 | `goal_completed_by_evaluator` | Worker called `update_goal completed_by:"evaluator"` after a `complete` verdict |
+| `goal_blocked` | Worker called `update_goal status:blocked` after a repeated blocker |
 | `goal_abandoned` | `/goal-abandon` |
-| `goal_paused_by_user` | `/goal-pause` |
+| `goal_paused` | `/goal-pause` or repo pause path |
 | `goal_resumed` | `/goal-resume` |
-| `goal_budget_limited` | Token budget breached |
-| `goal_paused_continuation_cap` | 0 continuations remaining |
-| `goal_paused_wall_clock_cap` | Wall-clock cap reached |
-| `goal_extended_continuations` | `/goal-extend --add-continuations N` |
-| `goal_extended_hours` | `/goal-extend --add-hours N` |
-| `goal_reconciled` | `/goal-reconcile --accept-reset` |
-| `goal_degraded` | Hook caught an unexpected error |
+| `budget_limit_reported` | One-shot budget-limit prompt emitted |
+| `cap_reached` | Continuation or wall-clock cap reached |
+| `paused_degraded` | Hook caught an unexpected error |
 | `final_turn_accounted` | F5 retry captured late completion-turn tokens |
-| `accounting_uncertain_set` | `/compact` rewrote transcript; cursor invalidated |
+| `tokens_accounted` | Worker or subagent token cursor advanced |
 
 `/goal-history --format=json --all` returns these events for post-hoc analysis.
 

@@ -27,12 +27,14 @@ SID_ESC=${SID//\'/\'\'}
 
 # Use sqlite3 -json output and jq for robust parsing per Phase 4.6 lesson
 ROW=$(sqlite3 -bail -cmd ".timeout 5000" -json "$DB_PATH" \
-  "SELECT status, paused_reason, tokens_used, token_budget, continuations_remaining FROM goals WHERE session_id = '$SID_ESC';" 2>/dev/null || echo "")
+  "SELECT status, paused_reason, tokens_used, subagent_tokens, token_budget, continuations_remaining FROM goals WHERE session_id = '$SID_ESC';" 2>/dev/null || echo "")
 [[ -z "$ROW" || "$ROW" == "[]" ]] && exit 0
 
 STATUS=$(echo "$ROW" | jq -r '.[0].status')
 REASON=$(echo "$ROW" | jq -r '.[0].paused_reason // ""')
-TU=$(echo "$ROW" | jq -r '.[0].tokens_used // 0')
+WORKER_TOKENS=$(echo "$ROW" | jq -r '.[0].tokens_used // 0')
+SUBAGENT_TOKENS=$(echo "$ROW" | jq -r '.[0].subagent_tokens // 0')
+TU=$((WORKER_TOKENS + SUBAGENT_TOKENS))
 TB=$(echo "$ROW" | jq -r '.[0].token_budget // ""')
 
 # Format tokens. Autonomous goals run in the millions, so we need M:
@@ -65,6 +67,7 @@ case "$STATUS" in
     fi
     ;;
   budget_limited) echo "◎ goal unmet (budget exhausted)" ;;
+  blocked) echo "◎ goal blocked" ;;
   paused)
     case "$REASON" in
       user) echo "◎ goal paused (user)" ;;

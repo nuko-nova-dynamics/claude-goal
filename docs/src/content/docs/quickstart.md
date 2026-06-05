@@ -25,7 +25,7 @@ Every assistant turn ends with the Stop hook. The hook reads the transcript JSON
 
 - emits `{"decision":"block","reason":"<continuation prompt>"}` — Claude Code feeds the prompt back to the model for the next turn
 - emits a budget-limit / cap-reached prompt and stops if a threshold is hit
-- stays silent if the worker has already called `update_goal` to mark complete
+- stays silent if the worker has already called `update_goal` to mark complete or blocked
 
 While the loop runs you can check status at any time:
 
@@ -56,10 +56,10 @@ For this trivial task, 500K is far more than you need — it's the **floor** tha
 
 When `(tokens_used + subagent_tokens) >= the budget`, the hook transitions the goal to `budget_limited` and emits the one-shot budget-limit prompt. The model sees that prompt, knows the goal is paused, and stops trying to continue.
 
-To raise the turn cap and resume (does not raise the token budget):
+To raise the token budget and resume:
 
 ```
-/goal-extend --add-continuations 50
+/goal-extend --add-tokens 500000
 ```
 
 ## 4. Pause + resume
@@ -75,6 +75,8 @@ Hook now stays silent until you explicitly resume:
 ```
 
 `/goal-pause` is the safe brake — token accounting still tracks, but the model is not pushed to continue.
+
+If the worker hits the same external blocker repeatedly, it can mark the goal `blocked`. Resolve the blocker, then run `/goal-resume` to continue from the same persisted goal.
 
 ## 5. Stop cleanly
 

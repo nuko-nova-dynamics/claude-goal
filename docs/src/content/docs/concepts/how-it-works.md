@@ -20,7 +20,7 @@ sequenceDiagram
 
     U->>CC: /goal-start "objective" --budget 3000000
     CC->>DB: create_goal (status=active)
-    loop until done / paused / capped
+    loop until done / blocked / paused / capped
         CC->>CC: assistant turn
         CC->>H: Stop event
         H->>DB: account worker + subagent tokens
@@ -48,7 +48,7 @@ After every assistant turn, `scripts/stop.sh` fires. The hook:
 4. Checks budget, continuation cap, and wall-clock cap
 5. If still going, emits `{"decision":"block","reason":"<continuation prompt>"}` — Claude Code feeds that prompt back to the model
 6. If a cap fired, transitions status and emits a one-shot reason
-7. If the worker has already called `update_goal status:complete`, stays silent
+7. If the worker has already called `update_goal status:complete` or `status:blocked`, stays silent
 
 The continuation prompt template lives in `prompts/continuation.md` — adapted from OpenAI Codex's `core/templates/goals/continuation.md` with modifications for Claude Code's hook API.
 
@@ -64,7 +64,7 @@ Cache-**read** tokens are excluded — they don't count against the budget becau
 
 Parent-worker counts go to `goals.tokens_used`. Subagent counts go to `goals.subagent_tokens`, keyed by `agent_id` in `subagent_token_cursors` so each subagent has its own cursor and you can attribute usage per-agent post-hoc.
 
-## 3. Dual completion paths
+## 3. Completion and blockers
 
 Completion can fire from either path:
 
@@ -73,6 +73,8 @@ Completion can fire from either path:
 **Evaluator subagent.** The continuation prompt instructs the worker to dispatch `claude-goal:goal-evaluator` before marking complete. The subagent runs in a fresh context (no inherited conversation, no sunk-cost bias) with `Bash + Read + jq + sqlite3`. It reads the objective from the DB, inspects recent transcript state, **and verifies with tools** — run the test, read the file, check the exit code. Returns `{"verdict":"complete|incomplete|unverifiable","reason":"..."}`. On `complete`, the worker calls `update_goal` with `completed_by: "evaluator"`, logging a distinct `goal_completed_by_evaluator` event.
 
 The evaluator prompt is conservative by design: **optimistic language is never proof**. Vague "should work now" → `incomplete`. Explicit evidence (exit codes, file contents, test reports) → `complete`.
+
+**Blocked state.** The worker can call `update_goal` with `status: "blocked"` only when the same blocker repeats across at least three consecutive continuation turns and no meaningful progress is possible without user input or an external-state change. Blocked goals stop auto-continuing, remain auditable in `goal_events`, and can be restarted with `/goal-resume`.
 
 ## 4. Budget and cap enforcement
 
@@ -83,7 +85,7 @@ At the start of every Stop hook run:
 | `tokens_used + subagent_tokens >= token_budget` | `status=budget_limited`, emit budget-limit prompt |
 | `continuations_remaining <= 0` | `status=paused`, `paused_reason=continuation_cap` |
 | `elapsed_wall_clock >= wall_clock_cap` | `status=paused`, `paused_reason=wall_clock_cap` |
-| Catch-all error in hook | `status=degraded` |
+| Catch-all error in hook | `status=paused`, `paused_reason=degraded` |
 
 `/goal-extend` is how you raise a cap and resume.
 
@@ -104,7 +106,7 @@ All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode).
 | `goals` | One row per goal — status, token counts, continuation budget, wall-clock usage, version (for optimistic concurrency) |
 | `goal_events` | Full audit log — every status transition, completion event, accounting reset, cap fire, etc. |
 | `subagent_token_cursors` | Per-`agent_id` byte cursor into each subagent's transcript JSONL |
-| `schema_version` | Migration version (current: 2). Migration runner is in `mcp/goal-server/src/db.ts` — transactional, version-ordered, downgrade-protected. |
+| `schema_version` | Migration version (current: 3). Migration runner is in `mcp/goal-server/src/db.ts` — transactional, version-ordered, downgrade-protected. |
 
 The `goals` table has a unique constraint on `session_id` for active goals, so a session can only own one live goal at a time.
 
@@ -116,7 +118,7 @@ The bundled MCP server (`mcp/goal-server`) exposes three tools:
 |---|---|---|
 | `create_goal` | `/goal-start` skill | Insert a new goal row. Replaces any prior completed/abandoned goal for this session. |
 | `get_goal` | Worker, evaluator subagent | Read the active goal — used by the evaluator to learn the objective. |
-| `update_goal` | Worker on completion | Transition status. `completed_by` enum distinguishes `self_update` from `evaluator`. |
+| `update_goal` | Worker on completion or genuine blocker | Transition to `complete` or `blocked`. `completed_by` enum distinguishes `self_update` from `evaluator` for completion. |
 
 All other lifecycle operations (`pause`, `resume`, `abandon`, `extend`, `reconcile`, `cleanup`, `history`, `doctor`) go through `scripts/goal-cli.sh` — they're slash-command skills, not MCP tools.
 

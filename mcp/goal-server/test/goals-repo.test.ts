@@ -37,6 +37,20 @@ describe("GoalsRepo.create", () => {
     expect(() => repo.create({ session_id: "s1", objective: "second", token_budget: null })).toThrow(/already exists.*active/);
   });
 
+  it("rejects creation when paused goal exists", () => {
+    const repo = freshRepo();
+    const first = repo.create({ session_id: "s1", objective: "first", token_budget: null });
+    repo.pause("s1", first.goal_id, "user");
+    expect(() => repo.create({ session_id: "s1", objective: "second", token_budget: null })).toThrow(/already exists.*paused/);
+  });
+
+  it("rejects creation when blocked goal exists", () => {
+    const repo = freshRepo();
+    const first = repo.create({ session_id: "s1", objective: "first", token_budget: null });
+    repo.markBlocked("s1", first.goal_id, "waiting on user input");
+    expect(() => repo.create({ session_id: "s1", objective: "second", token_budget: null })).toThrow(/already exists.*blocked/);
+  });
+
   it("replaces a complete goal with goal_replaced event", () => {
     const repo = freshRepo();
     const first = repo.create({ session_id: "s1", objective: "first", token_budget: null });
@@ -48,6 +62,20 @@ describe("GoalsRepo.create", () => {
 
     const events = repo.listEvents("s1");
     expect(events.find(e => e.event_type === "goal_replaced")).toBeTruthy();
+  });
+
+  it("replacement resets continuation and wall-clock caps", () => {
+    const repo = freshRepo();
+    const first = repo.create({ session_id: "s1", objective: "first", token_budget: null });
+    repo["db"]
+      .prepare("UPDATE goals SET continuations_remaining = 3, max_wall_clock_seconds = 999999 WHERE session_id = 's1'")
+      .run();
+    repo.markComplete("s1", first.goal_id);
+
+    const second = repo.create({ session_id: "s1", objective: "second", token_budget: null });
+
+    expect(second.continuations_remaining).toBe(50);
+    expect(second.max_wall_clock_seconds).toBe(14400);
   });
 
   it("rejects empty objective", () => {
@@ -82,6 +110,35 @@ describe("GoalsRepo.markComplete", () => {
   });
 });
 
+describe("GoalsRepo.markBlocked", () => {
+  it("transitions active to blocked and records reason", () => {
+    const repo = freshRepo();
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
+    repo.testHelper_setResumeAt(g.session_id, Date.now() - 2000);
+    repo.markBlocked("s1", g.goal_id, "external approval required");
+
+    const after = repo.getBySession("s1")!;
+    expect(after.status).toBe("blocked");
+    expect(after.resume_at_ms).toBeNull();
+    expect(after.time_used_seconds).toBeGreaterThanOrEqual(2);
+
+    const event = repo["db"]
+      .prepare("SELECT event_type, status_before, status_after, payload_json FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1")
+      .get() as { event_type: string; status_before: string; status_after: string; payload_json: string };
+    expect(event.event_type).toBe("goal_blocked");
+    expect(event.status_before).toBe("active");
+    expect(event.status_after).toBe("blocked");
+    expect(JSON.parse(event.payload_json).reason).toBe("external approval required");
+  });
+
+  it("rejects blocking a completed goal", () => {
+    const repo = freshRepo();
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
+    repo.markComplete("s1", g.goal_id);
+    expect(() => repo.markBlocked("s1", g.goal_id, "late blocker")).toThrow(/cannot mark blocked from status 'complete'/);
+  });
+});
+
 describe("GoalsRepo.pause/resume", () => {
   it("pause(user) flushes wall-clock and clears resume_at", () => {
     const repo = freshRepo();
@@ -111,5 +168,22 @@ describe("GoalsRepo.pause/resume", () => {
     const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
     repo.pause("s1", g.goal_id, "continuation_cap");
     expect(() => repo.resume("s1", g.goal_id)).toThrow(/use \/goal-extend/i);
+  });
+
+  it("resume restarts a blocked goal", () => {
+    const repo = freshRepo();
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: null });
+    repo.markBlocked("s1", g.goal_id, "needs credentials");
+    repo.resume("s1", g.goal_id);
+
+    const after = repo.getBySession("s1")!;
+    expect(after.status).toBe("active");
+    expect(after.resume_at_ms).toBeGreaterThan(0);
+
+    const event = repo["db"]
+      .prepare("SELECT status_before, status_after FROM goal_events WHERE event_type='goal_resumed' ORDER BY id DESC LIMIT 1")
+      .get() as { status_before: string; status_after: string };
+    expect(event.status_before).toBe("blocked");
+    expect(event.status_after).toBe("active");
   });
 });

@@ -87,6 +87,19 @@ EOF
   [ "$ROW" = "complete|150|u1" ]
 }
 
+@test "advance() can catch late final tokens after goal is already blocked" {
+  cat > "$TRANSCRIPT" <<'EOF'
+{"type":"user","uuid":"u0","message":{"content":[]}}
+{"type":"assistant","uuid":"u1","message":{"usage":{"input_tokens":100,"output_tokens":50},"content":[{"type":"tool_use","name":"update_goal","input":{"status":"blocked","blocked_reason":"needs credentials"}}]}}
+EOF
+  sqlite3 "$DB_PATH" "UPDATE goals SET status='blocked', token_budget=100, tokens_used=0, last_accounted_byte_offset=0, last_accounted_uuid=NULL WHERE session_id='s1';"
+
+  account_advance_inline "s1" "$TRANSCRIPT"
+
+  ROW=$(sqlite3 "$DB_PATH" "SELECT status || '|' || tokens_used || '|' || last_accounted_uuid FROM goals WHERE session_id='s1';")
+  [ "$ROW" = "blocked|150|u1" ]
+}
+
 @test "advance() on append with cursor uuid mismatch marks accounting uncertain" {
   account_advance_inline "s1" "$TRANSCRIPT"
   cat > "$TRANSCRIPT" <<'EOF'

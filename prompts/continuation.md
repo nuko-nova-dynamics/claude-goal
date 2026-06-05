@@ -43,4 +43,9 @@ If the evaluator returns `incomplete`, keep working on the missing items. If the
 
 Do not rely on intent, partial progress, elapsed effort, memory of earlier work, or a plausible final answer as proof of completion. Only mark the goal achieved when the audit shows that the objective has actually been achieved and no required work remains. If any requirement is missing, incomplete, or unverified, keep working instead of marking the goal complete. If the objective is achieved, call update_goal so usage accounting is preserved. Report the final elapsed time, and if the achieved goal has a token budget, report the final consumed token budget to the user after update_goal succeeds.
 
-Do not call update_goal unless the goal is complete. Do not mark a goal complete merely because the budget is nearly exhausted or because you are stopping work.
+Blocked handling:
+- Mark the goal `blocked` only when the same blocker has repeated across at least three consecutive continuation turns and you cannot make meaningful progress without user input or an external-state change.
+- Do not mark blocked merely because the work is hard, slow, uncertain, or would benefit from clarification.
+- When blocked, call update_goal with `{"status":"blocked","blocked_reason":"<specific blocker and what is needed>"}`. Keep the reason under 1000 characters.
+
+Do not call update_goal unless the goal is complete or genuinely blocked by the rule above. Do not mark a goal complete merely because the budget is nearly exhausted or because you are stopping work.

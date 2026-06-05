@@ -15,10 +15,10 @@ Every command lives under the `/goal-*` namespace.
 /goal-start "<objective>" [--budget N]
 ```
 
-Start a new autonomous goal. Replaces any prior `complete` or `abandoned` goal for this session. Fails if an `active`, `paused`, or `budget_limited` goal already exists — abandon it first.
+Start a new autonomous goal. Replaces any prior `complete` or `abandoned` goal for this session. Fails if an `active`, `paused`, `blocked`, or `budget_limited` goal already exists — abandon it first.
 
 - `<objective>` — quoted. Concrete, achievable objectives work best. Auto-mode's classifier may block vague objectives like `"do the task"`.
-- `--budget N` — optional. Hard cap on `(tokens_used + subagent_tokens)`. When breached, goal pauses with `paused_reason=budget_limited`.
+- `--budget N` — optional. Hard cap on `(tokens_used + subagent_tokens)`. When breached, the goal moves to `status=budget_limited`.
 
 ### `/goal-status`
 
@@ -35,9 +35,9 @@ Show the active goal's status, token totals, continuations remaining, wall-clock
 /goal-resume
 ```
 
-User pause/resume. While paused, the Stop hook stops emitting continuations but token accounting still runs (the model can still respond manually if you address it directly).
+User pause/resume. While paused, the Stop hook stops emitting continuations but token accounting still runs (the model can still respond manually if you address it directly). `/goal-resume` also restarts a `blocked` goal after the blocker is resolved.
 
-`/goal-resume` only works on user-paused goals. For cap-paused goals use `/goal-extend`.
+`/goal-resume` only works on user-paused, degraded, or blocked goals. For cap-paused goals use `/goal-extend`.
 
 ### `/goal-abandon`
 
@@ -53,14 +53,16 @@ Mark the goal `abandoned`. Permanent — the row stays in `goals.db` for history
 ```
 /goal-extend --add-continuations N
 /goal-extend --add-hours N
+/goal-extend --add-tokens N
 ```
 
-Raise a cap on a paused goal and resume it.
+Raise a cap or token budget and resume when the matching state is extendable.
 
 - `--add-continuations N` — only valid when `paused_reason=continuation_cap`. Adds N turns and resumes.
 - `--add-hours N` — only valid when `paused_reason=wall_clock_cap`. Adds N hours to the wall-clock cap and resumes.
+- `--add-tokens N` — valid for `active` or `budget_limited` goals. Adds N tokens to the current budget; for unbudgeted active goals, sets the budget to `tokens_used + subagent_tokens + N`. Resumes budget-limited goals.
 
-`--add-continuations` is also the right move for a `budget_limited` goal — adds turns so the model can wrap up cleanly. **Note** that it doesn't raise the token budget itself; if the goal is still over budget it'll re-pause immediately.
+All three flags require positive integers and are mutually exclusive.
 
 ## Maintenance
 

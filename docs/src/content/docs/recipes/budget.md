@@ -109,7 +109,7 @@ Final status:
 
 Came in under budget, took just over two hours, **150 continuation turns**. That's a real autonomous run.
 
-## What if the goal pauses with `budget_limited`?
+## What if the goal reaches `budget_limited`?
 
 Suppose the goal stalls and burns through the 3M cap:
 
@@ -129,14 +129,15 @@ You have three real options:
 
 **2. Take over manually.** Tell the model directly what to finish. Token accounting still tracks, but the autonomous loop is off.
 
-**3. Start a fresh goal with a higher cap.** If you trust the progress and just need more room:
+**3. Raise the token budget and resume.** If you trust the progress and just need more room:
 
 ```
-/goal-abandon
-/goal-start "<continuation of the prior objective with the remaining work>" --budget 5000000
+/goal-extend --add-tokens 2000000
 ```
 
-The prior goal's history is preserved in `goal_events` for forensic review.
+This keeps the same goal row, preserves the audit trail, and resumes from the budget-limited state.
+
+If the transcript shows looping or the objective needs to be narrowed, abandon and restart with a better objective instead.
 
 ## Patterns that work
 

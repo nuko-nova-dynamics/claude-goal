@@ -13,7 +13,7 @@
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/github/license/nuko-nova-dynamics/claude-goal?style=flat&color=4a4a4a"></a>
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/actions/workflows/test.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/nuko-nova-dynamics/claude-goal/test.yml?branch=main&style=flat&label=tests"></a>
   <img alt="claude code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=flat">
-  <img alt="tests" src="https://img.shields.io/badge/tests-188_green-4a4a4a?style=flat">
+  <img alt="tests" src="https://img.shields.io/badge/tests-207_green-4a4a4a?style=flat">
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@
 
 ## What is this
 
-`claude-goal` is a Claude Code plugin that drives the agent through an autonomous loop until a goal is provably met. Type `/goal-start "objective"` and the agent self-iterates — each turn ends in a Stop-hook continuation that feeds the next prompt — until **one** of the following: the model passes its own completion audit, the token budget exhausts, the turn count exhausts, or you stop it.
+`claude-goal` is a Claude Code plugin that drives the agent through an autonomous loop until a goal is provably met. Type `/goal-start "objective"` and the agent self-iterates — each turn ends in a Stop-hook continuation that feeds the next prompt — until **one** of the following: the model passes its own completion audit, the work is genuinely blocked, the token budget exhausts, the turn count exhausts, or you stop it.
 
 It's a production-grade companion to Claude Code 2.1.139+'s built-in `/goal`. The native command is great for casual conditions; this plugin adds **deterministic budgets, lifecycle controls, `/compact` recovery, persistence across restarts, and a tool-equipped evaluator subagent** that verifies completion by running tests / reading files / checking exit codes — not by trusting the worker's self-narrative.
 
@@ -47,6 +47,7 @@ It's a production-grade companion to Claude Code 2.1.139+'s built-in `/goal`. Th
 | Token budget | phrase in condition | `--budget N`, deterministic |
 | Turn / time caps | phrase in condition | hard 50-turn / 4h caps, `/goal-extend` to raise |
 | Pause · resume · abandon | `/goal clear` only | `/goal-pause`, `/goal-resume`, `/goal-abandon` |
+| Blocked-state recovery | prompt-only | `status=blocked`, visible status, `/goal-resume` |
 | `/compact` recovery | n/a | `accounting_uncertain` flag + `/goal-reconcile` |
 | Restart persistence | counters reset | SQLite preserves everything |
 | Completion judgment | fresh Haiku per turn (transcript-only) | dual path — worker self-audit **and** a plugin subagent that verifies with **tools** |
@@ -86,7 +87,7 @@ sequenceDiagram
 
     User->>CC: /goal-start "objective" --budget 3000000
     CC->>DB: create_goal (status=active)
-    loop until done / paused / capped
+    loop until done / blocked / paused / capped
         CC->>CC: assistant turn (tools, edits, reasoning)
         CC->>Hook: Stop event
         Hook->>DB: account worker + subagent tokens
@@ -113,13 +114,15 @@ sequenceDiagram
 
 **Completion — dual path.** The worker can self-audit and call `update_goal status:complete` (`completed_by: "self_update"`). The continuation prompt also instructs the worker to dispatch the `claude-goal:goal-evaluator` subagent before declaring done. The evaluator runs in a fresh context with `Bash + Read + jq + sqlite3` — it reads the objective from the DB, queries real state with tools, and returns `{"verdict":"complete"|"incomplete"|"unverifiable"}`. On `complete`, the worker calls `update_goal completed_by:"evaluator"`, which logs a distinct `goal_completed_by_evaluator` event. The two paths coexist; evaluator is preferred, self-audit is the fallback.
 
-**Budget / cap enforcement.** At the start of each Stop hook run, the hook checks `(tokens_used + subagent_tokens) >= token_budget`, `continuations_remaining <= 0`, and elapsed wall-clock. Any breach transitions the goal to `paused` with `paused_reason` set before checking for completion.
+**Blocked state.** If the same blocker repeats across at least three consecutive continuation turns and no meaningful progress is possible without user input or an external-state change, the worker can call `update_goal status:blocked blocked_reason:"..."`. Blocked goals stop auto-continuing, stay visible in status/history, and can be restarted with `/goal-resume`.
+
+**Budget / cap enforcement.** At the start of each Stop hook run, the hook checks `(tokens_used + subagent_tokens) >= token_budget`, `continuations_remaining <= 0`, and elapsed wall-clock. Token-budget breaches transition to `budget_limited`; continuation and wall-clock caps transition to `paused` with `paused_reason` set.
 
 **F5 final-turn accounting.** The completion turn's tokens are captured by a bounded retry loop after `detect_update_goal` returns true, and again when `update_goal` has already moved the row to `complete` before Stop reads the final transcript bytes. Five retries at 100ms intervals re-run `account_advance_inline` to catch transcripts that flush after the start-of-hook accounting pass.
 
-**State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, continuation budget, wall-clock usage, and a full audit log in `goal_events`. Schema is migration-versioned with v1→v2 transactional upgrade for the subagent cursor table.
+**State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, continuation budget, wall-clock usage, and a full audit log in `goal_events`. Schema is migration-versioned through v3, including subagent cursor storage and the `blocked` lifecycle state.
 
-**MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, `update_goal`. Slash-command skills invoke `create_goal`; the worker invokes `update_goal` on completion; all other lifecycle ops go through `scripts/goal-cli.sh`.
+**MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, `update_goal`. Slash-command skills invoke `create_goal`; the worker invokes `update_goal` on completion or a genuine blocker; all other lifecycle ops go through `scripts/goal-cli.sh`.
 
 </details>
 
@@ -129,10 +132,11 @@ sequenceDiagram
 |---|---|
 | `/goal-start "objective" [--budget N]` | Start a new goal. Replaces any prior completed/abandoned goal for this session. |
 | `/goal-status` | Current goal, status, worker + subagent tokens, continuations remaining, warnings. |
-| `/goal-pause` · `/goal-resume` | User pause/resume. |
+| `/goal-pause` · `/goal-resume` | User pause/resume, or resume a blocked goal. |
 | `/goal-abandon` (`/goal-stop`) | Abandon permanently. Stops the auto-continuation loop. |
 | `/goal-extend --add-continuations N` | Raise turn cap on a `continuation_cap`-paused goal and resume. |
 | `/goal-extend --add-hours N` | Raise wall-clock cap on a `wall_clock_cap`-paused goal and resume. |
+| `/goal-extend --add-tokens N` | Raise token budget and resume a `budget_limited` goal. |
 | `/goal-reconcile --accept-reset` | Clear the `accounting_uncertain` flag set after `/compact`. Resets accounting to the current transcript cursor. |
 | `/goal-doctor` | Preflight self-test: SQLite, MCP connectivity, hook registration, shell deps. |
 | `/goal-history [--all] [--format=json]` | Tracked goals for this session, or `--all` for cross-session, sorted newest first. |
@@ -188,6 +192,7 @@ Renders one of:
 - `◎ goal active (1.2M / 5M)` — active with budget
 - `◎ goal active (800K)` — active, no budget
 - `◎ goal paused (user)` — user paused
+- `◎ goal blocked` — blocked until user input or external state changes
 - `◎ goal unmet (budget exhausted)` — budget hit
 - `◎ goal achieved` — complete
 

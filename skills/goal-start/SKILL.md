@@ -26,3 +26,5 @@ From now until the goal is marked complete, after every turn the system will inj
 Before marking the goal complete, build and verify a prompt-to-artifact checklist showing every requirement is met. Then dispatch the plugin subagent `claude-goal:goal-evaluator` with the Agent tool (Task is an older alias if Agent is unavailable). Pass the session id, objective, checklist, transcript path if known, and concrete evidence. If it returns `{"verdict":"complete"}`, call `update_goal` with `status: "complete"` and `completed_by: "evaluator"`.
 
 If the evaluator is unavailable, blocked, or explicitly skipped by the user, keep the worker-only fallback: use your own completion audit and call `update_goal` with `status: "complete"` only when the goal is complete. Do not mark complete on partial progress.
+
+If the same blocker repeats across at least three consecutive continuation turns and no meaningful progress is possible without user input or an external-state change, call `update_goal` with `status: "blocked"` and a concise `blocked_reason`. Do not use blocked for work that is merely hard, slow, uncertain, or under-verified.
