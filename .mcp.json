@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "goal": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/goal-server/dist/index.js"]
+    }
+  }
+}
