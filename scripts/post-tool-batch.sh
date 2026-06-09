@@ -3,6 +3,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/log.sh"
 source "$SCRIPT_DIR/lib/sqlite-retry.sh"
+source "$SCRIPT_DIR/lib/schema.sh"
 source "$SCRIPT_DIR/lib/accounting-core.sh"
 
 # Resolve DB path the same way goal-cli.sh does:
@@ -26,6 +27,12 @@ AGENT_TRANSCRIPT=$(echo "$INPUT" | jq -r '.agent_transcript_path // ""' 2>/dev/n
 
 if [[ -z "$SESSION_ID" || -z "$TRANSCRIPT" ]]; then
   log_error "post-tool-batch: missing session_id or transcript_path"
+  exit 0
+fi
+
+if ! ensure_schema_current; then
+  log_error "post-tool-batch: schema migration guard failed for $DB_PATH"
+  echo '{"systemMessage":"claude-goal: database schema migration failed; token accounting skipped until /goal-doctor passes."}'
   exit 0
 fi
 

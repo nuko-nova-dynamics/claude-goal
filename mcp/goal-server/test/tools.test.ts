@@ -55,11 +55,11 @@ describe("create_goal tool", () => {
     const repo = freshRepo();
     const out = handleCreateGoal(repo, { session_id: "s1", objective: "ship it", budget_profile: "deep" });
     expect(out.goal!).toMatchObject({
-      token_budget: 5000000,
+      token_budget: 100000000,
       budget_profile: "deep",
       budget_source: "profile",
-      continuations_remaining: 150,
-      max_wall_clock_seconds: 28800,
+      continuations_remaining: 1000,
+      max_wall_clock_seconds: 86400,
     });
   });
 
@@ -71,7 +71,7 @@ describe("create_goal tool", () => {
       budget_profile: "auto",
     });
     expect(out.goal!).toMatchObject({
-      token_budget: 5000000,
+      token_budget: 100000000,
       budget_profile: "deep",
       budget_source: "auto",
     });

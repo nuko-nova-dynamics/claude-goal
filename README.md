@@ -13,7 +13,7 @@
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/github/license/nuko-nova-dynamics/claude-goal?style=flat&color=4a4a4a"></a>
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/actions/workflows/test.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/nuko-nova-dynamics/claude-goal/test.yml?branch=main&style=flat&label=tests"></a>
   <img alt="claude code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=flat">
-  <img alt="tests" src="https://img.shields.io/badge/tests-218_green-4a4a4a?style=flat">
+  <img alt="tests" src="https://img.shields.io/badge/tests-243_green-4a4a4a?style=flat">
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@
 
 ## What is this
 
-`claude-goal` is a Claude Code plugin that drives the agent through an autonomous loop until a goal is provably met. Type `/goal-start "objective"` or explicitly tell Claude "set up a goal for this and continue" and the agent self-iterates — each turn ends in a Stop-hook continuation that feeds the next prompt — until **one** of the following: the model passes its own completion audit, the work is genuinely blocked, a budget profile or raw token budget exhausts, the turn count exhausts, the wall-clock cap exhausts, or you stop it.
+`claude-goal` is a Claude Code plugin that drives the agent through an autonomous loop until a goal is provably met. Type `/goal-start "objective"` or explicitly tell Claude "set up a goal for this and continue" and the agent self-iterates — each turn ends in a Stop-hook continuation that feeds the next prompt — until **one** of the following: the model passes its own completion audit, the work is genuinely blocked, a budget profile or raw token budget exhausts, a profile turn/time envelope exhausts, or you stop it.
 
 It's a production-grade companion to Claude Code 2.1.139+'s built-in `/goal`. The native command is great for casual conditions; this plugin adds **deterministic budgets, lifecycle controls, `/compact` recovery, persistence across restarts, and a tool-equipped evaluator subagent** that verifies completion by running tests / reading files / checking exit codes — not by trusting the worker's self-narrative.
 
@@ -45,7 +45,7 @@ It's a production-grade companion to Claude Code 2.1.139+'s built-in `/goal`. Th
 |---|---|---|
 | Autonomous continuation | ✓ | ✓ |
 | Budget control | phrase in condition | deterministic profiles (`quick`, `standard`, `deep`, `overnight`, `auto`) or raw token caps |
-| Turn / time caps | phrase in condition | profile-sized hard caps, `/goal-extend` to raise |
+| Turn / time caps | phrase in condition | practical-unlimited by default; profile-sized hard caps, `/goal-extend` to raise |
 | Pause · resume · abandon | `/goal clear` only | `/goal-pause`, `/goal-resume`, `/goal-abandon` |
 | Blocked-state recovery | prompt-only | `status=blocked`, visible status, `/goal-resume` |
 | `/compact` recovery | n/a | `accounting_uncertain` flag + `/goal-reconcile` |
@@ -74,7 +74,7 @@ set up a goal and refactor the auth module to use async/await, then keep going
 Claude confirms the goal, begins working, and continues across turns without further prompting. When it decides the objective is met, it dispatches the evaluator subagent for verification, then calls `update_goal` and stops.
 
 > [!TIP]
-> Start with profile names, not raw token math: `quick` (500K tokens, 25 turns, 1h), `standard` (2M, 75 turns, 4h), `deep` (5M, 150 turns, 8h), `overnight` (20M, 500 turns, 12h), or `auto` for deterministic objective-based selection. Omitting `--budget` on `/goal-start` remains unbounded. Explicit natural-language goal starts use `auto` unless you ask for another profile, raw token budget, or unbounded mode. Raw token numbers still work for advanced tuning. See [`docs/concepts/budgets`](https://nuko-nova-dynamics.github.io/claude-goal/concepts/budgets/) for details.
+> Start with profile names, not raw token math: `quick` (2M tokens, 50 turns, 2h), `standard` (10M, 200 turns, 8h), `deep` (100M, 1,000 turns, 24h), `overnight` (1B, 5,000 turns, 72h), or `auto` for deterministic objective-based selection. Omitting `--budget` on `/goal-start` remains practical-unlimited for token, turn, and wall-clock budget. Explicit natural-language goal starts use `auto` unless you ask for another profile, raw token budget, or unbounded mode. Raw token numbers still work for advanced tuning. See [`docs/concepts/budgets`](https://nuko-nova-dynamics.github.io/claude-goal/concepts/budgets/) for details.
 
 ## How it works
 
@@ -122,7 +122,7 @@ sequenceDiagram
 
 **F5 final-turn accounting.** The completion turn's tokens are captured by a bounded retry loop after `detect_update_goal` returns true, and again when `update_goal` has already moved the row to `complete` before Stop reads the final transcript bytes. Five retries at 100ms intervals re-run `account_advance_inline` to catch transcripts that flush after the start-of-hook accounting pass.
 
-**State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, selected budget profile/source, continuation budget, wall-clock usage, and a full audit log in `goal_events`. Schema is migration-versioned through v4, including subagent cursor storage, the `blocked` lifecycle state, and budget profile provenance.
+**State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, selected budget profile/source, continuation budget, wall-clock usage, and a full audit log in `goal_events`. Schema is migration-versioned through v5, including subagent cursor storage, the `blocked` lifecycle state, budget profile provenance, and large-run defaults.
 
 **MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, `update_goal`. The `/goal-start` skill and explicit natural-language goal-start requests invoke `create_goal`; the worker invokes `update_goal` on completion or a genuine blocker; all other lifecycle ops go through `scripts/goal-cli.sh`.
 
@@ -160,7 +160,7 @@ Updates land via `/plugin update claude-goal` once new versions are tagged.
 
 ```bash
 mkdir -p ~/.claude/plugins/local/claude-goal
-tar -xzf claude-goal-v0.2.5.tar.gz -C ~/.claude/plugins/local/claude-goal
+tar -xzf claude-goal-v0.2.6.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 

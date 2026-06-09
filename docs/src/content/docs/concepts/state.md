@@ -46,8 +46,8 @@ CREATE TABLE goals (
   last_accounted_uuid         TEXT,
   accounting_uncertain        INTEGER NOT NULL DEFAULT 0,
   last_continuation_at_ms     INTEGER,
-  continuations_remaining     INTEGER NOT NULL DEFAULT 50,
-  max_wall_clock_seconds      INTEGER NOT NULL DEFAULT 14400,
+  continuations_remaining     INTEGER NOT NULL DEFAULT 1000000,
+  max_wall_clock_seconds      INTEGER NOT NULL DEFAULT 315360000,
   budget_limit_reported       INTEGER NOT NULL DEFAULT 0,
   version                     INTEGER NOT NULL DEFAULT 0,
   created_at_ms               INTEGER NOT NULL,
@@ -74,7 +74,7 @@ CREATE TABLE subagent_token_cursors (
 );
 ```
 
-Migration history: v1 initial schema, v2 per-subagent token attribution, v3 `blocked` status, v4 budget profile/source provenance.
+Migration history: v1 initial schema, v2 per-subagent token attribution, v3 `blocked` status, v4 budget profile/source provenance, v5 large-run defaults and profile envelope upgrade.
 
 The migration runner is in `mcp/goal-server/src/db.ts` — transactional, version-ordered, **downgrade-protected** (the runner refuses to run if `schema_version` exceeds the highest known migration).
 

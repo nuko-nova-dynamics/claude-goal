@@ -8,26 +8,29 @@ export interface BudgetProfileConfig {
   max_wall_clock_seconds: number;
 }
 
+export const PRACTICAL_UNBOUNDED_CONTINUATIONS = 1_000_000;
+export const PRACTICAL_UNBOUNDED_WALL_CLOCK_SECONDS = 315_360_000; // 10 years
+
 export const BUDGET_PROFILES: Record<BudgetProfile, BudgetProfileConfig> = {
   quick: {
-    token_budget: 500_000,
-    continuations_remaining: 25,
-    max_wall_clock_seconds: 3_600,
+    token_budget: 2_000_000,
+    continuations_remaining: 50,
+    max_wall_clock_seconds: 7_200,
   },
   standard: {
-    token_budget: 2_000_000,
-    continuations_remaining: 75,
-    max_wall_clock_seconds: 14_400,
-  },
-  deep: {
-    token_budget: 5_000_000,
-    continuations_remaining: 150,
+    token_budget: 10_000_000,
+    continuations_remaining: 200,
     max_wall_clock_seconds: 28_800,
   },
+  deep: {
+    token_budget: 100_000_000,
+    continuations_remaining: 1_000,
+    max_wall_clock_seconds: 86_400,
+  },
   overnight: {
-    token_budget: 20_000_000,
-    continuations_remaining: 500,
-    max_wall_clock_seconds: 43_200,
+    token_budget: 1_000_000_000,
+    continuations_remaining: 5_000,
+    max_wall_clock_seconds: 259_200,
   },
 };
 

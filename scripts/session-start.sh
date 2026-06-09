@@ -3,6 +3,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/log.sh"
 source "$SCRIPT_DIR/lib/sqlite-retry.sh"
+source "$SCRIPT_DIR/lib/schema.sh"
 source "$SCRIPT_DIR/lib/accounting-core.sh"
 
 # ---------------------------------------------------------------------------
@@ -73,6 +74,11 @@ log_info "session-start.sh fired (source=$SOURCE)"
 # ---------------------------------------------------------------------------
 [[ -z "$SESSION_ID" ]] && exit 0
 [[ ! -f "$DB_PATH" ]] && exit 0
+if ! ensure_schema_current; then
+  log_error "session-start: schema migration guard failed for $DB_PATH"
+  echo '{"systemMessage":"claude-goal: database schema migration failed; run /goal-doctor and reload/update the plugin."}'
+  exit 0
+fi
 
 SESSION_ID_ESC=$(sql_escape "$SESSION_ID")
 NOW=$(ms_now)

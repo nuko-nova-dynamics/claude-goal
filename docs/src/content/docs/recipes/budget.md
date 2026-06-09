@@ -22,7 +22,7 @@ Notes on the objective and the profile:
 - **Concrete scope** — `src/auth/*`, not "the auth code"
 - **Explicit acceptance criterion** — tests pass in `test/auth/`
 - **Constraint** — preserve existing contracts (a hint to the evaluator: contract-breaking refactors → `incomplete`)
-- **`deep` profile** — 5M tokens, 150 continuations, and 8 hours. That leaves room for a multi-file refactor plus evaluator feedback without manually sizing three caps.
+- **`deep` profile** — 100M tokens, 1,000 continuations, and 24 hours. That leaves room for a multi-file refactor plus evaluator feedback without manually sizing three caps.
 
 ## What the loop looks like at minute 15
 
@@ -32,9 +32,9 @@ Notes on the objective and the profile:
 ◎ Goal: refactor src/auth/* to use async/await...
   status:      active
   budget:      deep profile
-  tokens:      612,043 worker · 84,200 subagent (696,243 / 5,000,000)
-  continuations remaining: 112 / 150
-  wall-clock used: 0h 15m / 8h
+  tokens:      612,043 worker · 84,200 subagent (696,243 / 100,000,000)
+  continuations remaining: 962 / 1,000
+  wall-clock used: 0h 15m / 24h
 ```
 
 Worker has read several files, made initial changes, and the evaluator has dispatched once to check progress (subagent tokens are non-zero). The cache has warmed — subsequent turns are cheap.
@@ -50,9 +50,9 @@ Profile caps are intentionally larger than the unprofiled defaults, but a real r
   status:      paused
   paused_reason: continuation_cap
   budget:      deep profile
-  tokens:      2,401,328 worker · 311,400 subagent (2,712,728 / 5,000,000)
-  continuations remaining: 0 / 150
-  wall-clock used: 2h 47m / 8h
+  tokens:      28,401,328 worker · 3,311,400 subagent (31,712,728 / 100,000,000)
+  continuations remaining: 0 / 1,000
+  wall-clock used: 18h 47m / 24h
 ```
 
 The token budget is fine. The turn cap fired. Extend it:
@@ -106,7 +106,7 @@ Final status:
   status:      complete
   completed_by: evaluator
   budget:      deep profile
-  tokens:      2,341,801 worker · 392,500 subagent (2,734,301 / 5,000,000)
+  tokens:      2,341,801 worker · 392,500 subagent (2,734,301 / 100,000,000)
   duration:    2h 14m
 ```
 
@@ -114,7 +114,7 @@ Came in under budget, took just over two hours, and stayed inside the `deep` run
 
 ## What if the goal reaches `budget_limited`?
 
-Suppose the goal stalls and burns through the 5M cap:
+Suppose the goal stalls and burns through the 100M cap:
 
 ```
 /goal-status
@@ -122,8 +122,8 @@ Suppose the goal stalls and burns through the 5M cap:
 ◎ Goal: refactor src/auth/* to use async/await...
   status:      budget_limited
   budget:      deep profile
-  tokens:      4,941,820 worker · 58,180 subagent (5,000,000 / 5,000,000)
-  continuations remaining: 12 / 150
+  tokens:      98,941,820 worker · 1,058,180 subagent (100,000,000 / 100,000,000)
+  continuations remaining: 120 / 1,000
 ```
 
 You have three real options:

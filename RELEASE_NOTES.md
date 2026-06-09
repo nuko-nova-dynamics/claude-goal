@@ -1,3 +1,31 @@
+# claude-goal v0.2.6
+
+**Large-run envelopes and no hidden short defaults.**
+
+This release makes goal budgets match modern Claude Code usage. Omitted budgets and raw-token budgets now use practical-unlimited turn/time sentinels instead of hidden 50-turn / 4-hour defaults. Smart profiles are much larger:
+
+- `quick`: 2M tokens, 50 continuations, 2 hours
+- `standard`: 10M tokens, 200 continuations, 8 hours
+- `deep`: 100M tokens, 1,000 continuations, 24 hours
+- `overnight`: 1B tokens, 5,000 continuations, 72 hours
+
+Runtime changes:
+
+- SQLite schema moves to v5 and rebuilds the `goals` table with practical-unlimited defaults for direct inserts too.
+- Existing profile rows are lifted to the new minimum envelopes, including in-progress or modestly extended rows.
+- Existing unprofiled/raw-token rows are lifted to practical-unlimited turn/time envelopes.
+- Existing `budget_limited` profile rows resume automatically when the raised profile budget now exceeds recorded usage.
+- Hook/CLI paths run a narrow v4->v5 migration guard before reading goal state; if migration fails, hooks fail closed with a visible degraded message instead of enforcing stale caps.
+
+Verification target:
+
+- `npm --prefix mcp/goal-server test`
+- `npm --prefix mcp/goal-server run build`
+- `bats $(find tests -name '*.bats' | sort)`
+- `npm --prefix docs run build`
+- `claude plugin validate .`
+- `git diff --check`
+
 # claude-goal v0.2.5
 
 **Large-token accounting fix.**

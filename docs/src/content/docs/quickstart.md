@@ -23,7 +23,7 @@ Claude confirms the objective and begins working. For the slash command above, t
 
 1. Inserted a row into `goals.db` with `status=active`
 2. Stored the session ID so the Stop hook knows the goal is yours
-3. Initialized `tokens_used=0`, `subagent_tokens=0`, `continuations_remaining=50`, and a 4-hour wall-clock cap
+3. Initialized `tokens_used=0`, `subagent_tokens=0`, `continuations_remaining=1000000`, and a 10-year practical-unlimited wall-clock sentinel
 4. Left `token_budget` empty, because omitted budgets are intentionally unbounded
 
 For explicit prose starts, Claude derives the objective from your request and uses `budget_profile=auto` unless you ask for `quick`, `standard`, `deep`, `overnight`, a raw token budget, or unbounded mode.
@@ -48,8 +48,8 @@ Returns something like:
 ◎ Goal: list every .ts file under src/ and print a line count for each
   status:      active
   tokens:      12,418 worker · 2,103 subagent (14,521 total)
-  continuations remaining: 47 / 50
-  wall-clock used: 0h 03m / 4h
+  continuations remaining: 999,997 / 1,000,000
+  wall-clock used: 0h 03m / 10y
 ```
 
 ## 3. Add a budget profile
@@ -61,7 +61,7 @@ Cancel the goal and start over with a profile. Profiles set the token cap, conti
 /goal-start "list every .ts file under src/ and print a line count for each" --budget quick
 ```
 
-`quick` gives the run 500K tokens, 25 continuations, and 1 hour. For actual implementation work, start with `standard`. Use `deep` for broad refactors or integrations, `overnight` for explicitly long unattended runs, and `auto` when you want the plugin to select one deterministically from the objective. See [Budgets and caps](/claude-goal/concepts/budgets/) for the full table.
+`quick` gives the run 2M tokens, 50 continuations, and 2 hours. For actual implementation work, start with `standard`. Use `deep` for broad refactors or integrations, `overnight` for explicitly long unattended runs, and `auto` when you want the plugin to select one deterministically from the objective. See [Budgets and caps](/claude-goal/concepts/budgets/) for the full table.
 
 When `(tokens_used + subagent_tokens) >= the budget`, the hook transitions the goal to `budget_limited` and emits the one-shot budget-limit prompt. The model sees that prompt, knows the goal is paused, and stops trying to continue.
 

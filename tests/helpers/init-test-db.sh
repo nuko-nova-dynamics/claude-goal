@@ -8,3 +8,4 @@ sqlite3 "$DB_PATH_ARG" < "$REPO_ROOT/mcp/goal-server/src/migrations/001_initial.
 sqlite3 "$DB_PATH_ARG" < "$REPO_ROOT/mcp/goal-server/src/migrations/002_subagent_tokens.sql"
 sqlite3 "$DB_PATH_ARG" < "$REPO_ROOT/mcp/goal-server/src/migrations/003_blocked_status.sql"
 sqlite3 "$DB_PATH_ARG" < "$REPO_ROOT/mcp/goal-server/src/migrations/004_budget_profiles.sql"
+sqlite3 "$DB_PATH_ARG" < "$REPO_ROOT/mcp/goal-server/src/migrations/005_larger_goal_envelopes.sql"

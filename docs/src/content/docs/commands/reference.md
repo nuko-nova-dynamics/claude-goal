@@ -20,8 +20,8 @@ Start a new autonomous goal. Replaces any prior `complete` or `abandoned` goal f
 - `<objective>` — quoted. Concrete, achievable objectives work best. Auto-mode's classifier may block vague objectives like `"do the task"`.
 - `--budget quick|standard|deep|overnight` — optional. Selects a full run envelope: token budget, continuation cap, and wall-clock cap.
 - `--budget auto` — optional. Deterministically picks a profile from the objective. Explicit overnight/weekend wording selects `overnight`; broad migrations, redesigns, integrations, or repo-wide work select `deep`; bounded features and bug fixes with tests select `standard`; small inspection-style work falls back to `quick`.
-- `--budget N` — optional advanced form. Sets a raw hard cap on `(tokens_used + subagent_tokens)` and leaves the default continuation/wall-clock caps in place.
-- Omit `--budget` for an unbounded token budget. The default continuation and wall-clock caps still apply.
+- `--budget N` — optional advanced form. Sets a raw hard cap on `(tokens_used + subagent_tokens)` and leaves turn/wall-clock at the practical-unlimited defaults.
+- Omit `--budget` for practical-unlimited token, turn, and wall-clock budget.
 
 You can also start a goal with explicit natural language:
 

@@ -7,6 +7,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/log.sh"
 source "$SCRIPT_DIR/lib/sqlite-retry.sh"
+source "$SCRIPT_DIR/lib/schema.sh"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 if [[ -z "$PLUGIN_ROOT" ]]; then
   PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -96,6 +97,24 @@ is_positive_int() { [[ "$1" =~ ^[1-9][0-9]*$ ]]; }
 sql_change_count() {
   printf '%s\n' "$1" | awk '/^[[:space:]]*[0-9]+[[:space:]]*$/ { value=$1 } END { if (value != "") print value; else print "0" }'
 }
+
+SCHEMA_READY=1
+if [[ -f "$DB_PATH" ]]; then
+  if ! ensure_schema_current; then
+    SCHEMA_READY=0
+    log_error "goal-cli: schema migration guard failed for $DB_PATH"
+  fi
+fi
+
+case "$SUBCMD" in
+  doctor) ;;
+  *)
+    if [[ "$SCHEMA_READY" = "0" ]]; then
+      echo "error: goal database schema migration failed; run /goal-doctor and reload/update the plugin" >&2
+      exit 4
+    fi
+    ;;
+esac
 
 case "$SUBCMD" in
   status)
@@ -356,7 +375,7 @@ case "$SUBCMD" in
     if [[ -w "$DATA_DIR" ]]; then add_check plugin_data_writable pass "$DATA_DIR"; else add_check plugin_data_writable fail "$DATA_DIR not writable"; fi
     # Schema version
     SV=$(sqlite3 "$DB_PATH" "SELECT version FROM schema_version;" 2>/dev/null || echo "")
-    if [[ "$SV" = "4" ]]; then add_check schema_version pass "4"; else add_check schema_version fail "got '$SV'"; fi
+    if [[ "$SV" = "5" ]]; then add_check schema_version pass "5"; else add_check schema_version fail "got '$SV'"; fi
     # Dependencies
     for dep in node jq sqlite3 envsubst; do
       if command -v "$dep" >/dev/null 2>&1; then add_check "${dep}_present" pass; else add_check "${dep}_present" fail "$dep not found in PATH"; fi
@@ -396,7 +415,7 @@ case "$SUBCMD" in
 
     PLATFORM="${OSTYPE:-$(uname)}"
     if [[ "$FORMAT" = "json" ]]; then
-      jq -n --arg v "0.1.0" --arg p "$PLATFORM" --argjson c "$CHECKS" --arg o "$OVERALL" \
+      jq -n --arg v "0.2.6" --arg p "$PLATFORM" --argjson c "$CHECKS" --arg o "$OVERALL" \
         '{version:$v, platform:$p, checks:$c, overall:$o}'
     else
       echo "claude-goal doctor: $OVERALL"

@@ -3,6 +3,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/log.sh"
 source "$SCRIPT_DIR/lib/sqlite-retry.sh"
+source "$SCRIPT_DIR/lib/schema.sh"
 source "$SCRIPT_DIR/lib/accounting-core.sh"
 source "$SCRIPT_DIR/lib/lease.sh"
 source "$SCRIPT_DIR/lib/render-template.sh"
@@ -36,6 +37,13 @@ LAST_ASSISTANT_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // ""' 2
 
 [[ -z "$SESSION_ID" ]] && exit 0
 SESSION_ID_ESC=$(sql_escape "$SESSION_ID")
+
+if ! ensure_schema_current; then
+  log_error "stop: schema migration guard failed for $DB_PATH"
+  pause_as_degraded "$SESSION_ID" 2>/dev/null || true
+  echo "{\"systemMessage\":\"claude-goal: database schema migration failed; goal loop paused to avoid stale cap enforcement. Run /goal-doctor and reload/update the plugin.\"}"
+  exit 0
+fi
 
 latest_assistant_uuid() {
   local transcript="$1"

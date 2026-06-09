@@ -49,7 +49,7 @@ teardown() {
   [[ "$REASON" == *"claude-goal:goal-evaluator"* ]]
   [[ "$REASON" == *"session_id: s1"* ]]
   REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals;")
-  [ "$REM" = "49" ]
+  [ "$REM" = "999999" ]
 }
 
 @test "stop hook is silent when status=complete" {
@@ -67,7 +67,7 @@ teardown() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals WHERE session_id='s1';")
-  [ "$REM" = "50" ]
+  [ "$REM" = "1000000" ]
 }
 
 @test "stop hook recursion-guard short-circuits when stop_hook_active=true and no new assistant turn" {
@@ -97,7 +97,7 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *'"decision":"block"'* ]]
   REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals;")
-  [ "$REM" = "49" ]
+  [ "$REM" = "999999" ]
   EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='continuation_injected' AND json_extract(payload_json, '$.assistant_uuid')='u2';")
   [ "$EVENTS" = "1" ]
 }
@@ -115,7 +115,7 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *'"decision":"block"'* ]]
   REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals;")
-  [ "$REM" = "49" ]
+  [ "$REM" = "999999" ]
   NEW_HASH=$(hash_text "2")
   EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='continuation_injected' AND json_extract(payload_json, '$.assistant_message_hash')='$NEW_HASH';")
   [ "$EVENTS" = "1" ]
@@ -176,7 +176,7 @@ EOF
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals;")
-  [ "$REM" = "50" ]
+  [ "$REM" = "1000000" ]
 }
 
 @test "stop hook records budget limit even when update_goal appears in transcript" {
@@ -315,7 +315,7 @@ EOF
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   REM=$(sqlite3 "$DB_PATH" "SELECT continuations_remaining FROM goals WHERE session_id='s1';")
-  [ "$REM" = "50" ]
+  [ "$REM" = "1000000" ]
   EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='continuation_injected';")
   [ "$EVENTS" = "0" ]
   LEASES=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM continuation_leases WHERE session_id='s1';")
@@ -340,7 +340,7 @@ EOF
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   ROW=$(sqlite3 "$DB_PATH" "SELECT status || '|' || continuations_remaining FROM goals WHERE session_id='s1';")
-  [ "$ROW" = "complete|49" ]
+  [ "$ROW" = "complete|999999" ]
   EVENTS=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM goal_events WHERE event_type='continuation_injected';")
   [ "$EVENTS" = "0" ]
   LEASES=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM continuation_leases WHERE session_id='s1';")

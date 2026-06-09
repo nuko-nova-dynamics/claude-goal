@@ -26,8 +26,8 @@ describe("GoalsRepo.create", () => {
     expect(goal.status).toBe("active");
     expect(goal.tokens_used).toBe(0);
     expect(goal.subagent_tokens).toBe(0);
-    expect(goal.continuations_remaining).toBe(50);
-    expect(goal.max_wall_clock_seconds).toBe(14400);
+    expect(goal.continuations_remaining).toBe(1000000);
+    expect(goal.max_wall_clock_seconds).toBe(315360000);
     expect(goal.budget_profile).toBeNull();
     expect(goal.budget_source).toBe("tokens");
     expect(goal.resume_at_ms).toBeGreaterThan(0);
@@ -40,8 +40,8 @@ describe("GoalsRepo.create", () => {
     expect(goal.token_budget).toBeNull();
     expect(goal.budget_profile).toBeNull();
     expect(goal.budget_source).toBe("none");
-    expect(goal.continuations_remaining).toBe(50);
-    expect(goal.max_wall_clock_seconds).toBe(14400);
+    expect(goal.continuations_remaining).toBe(1000000);
+    expect(goal.max_wall_clock_seconds).toBe(315360000);
   });
 
   it("applies explicit budget profiles as full run envelopes", () => {
@@ -51,10 +51,10 @@ describe("GoalsRepo.create", () => {
     const deep = repo.create({ session_id: "deep", objective: "repo-wide migration", token_budget: null, budget_profile: "deep" });
     const overnight = repo.create({ session_id: "overnight", objective: "run overnight", token_budget: null, budget_profile: "overnight" });
 
-    expect(quick).toMatchObject({ token_budget: 500000, budget_profile: "quick", budget_source: "profile", continuations_remaining: 25, max_wall_clock_seconds: 3600 });
-    expect(standard).toMatchObject({ token_budget: 2000000, budget_profile: "standard", budget_source: "profile", continuations_remaining: 75, max_wall_clock_seconds: 14400 });
-    expect(deep).toMatchObject({ token_budget: 5000000, budget_profile: "deep", budget_source: "profile", continuations_remaining: 150, max_wall_clock_seconds: 28800 });
-    expect(overnight).toMatchObject({ token_budget: 20000000, budget_profile: "overnight", budget_source: "profile", continuations_remaining: 500, max_wall_clock_seconds: 43200 });
+    expect(quick).toMatchObject({ token_budget: 2000000, budget_profile: "quick", budget_source: "profile", continuations_remaining: 50, max_wall_clock_seconds: 7200 });
+    expect(standard).toMatchObject({ token_budget: 10000000, budget_profile: "standard", budget_source: "profile", continuations_remaining: 200, max_wall_clock_seconds: 28800 });
+    expect(deep).toMatchObject({ token_budget: 100000000, budget_profile: "deep", budget_source: "profile", continuations_remaining: 1000, max_wall_clock_seconds: 86400 });
+    expect(overnight).toMatchObject({ token_budget: 1000000000, budget_profile: "overnight", budget_source: "profile", continuations_remaining: 5000, max_wall_clock_seconds: 259200 });
   });
 
   it("resolves auto profiles deterministically", () => {
@@ -133,8 +133,8 @@ describe("GoalsRepo.create", () => {
 
     const second = repo.create({ session_id: "s1", objective: "second", token_budget: null, budget_profile: null });
 
-    expect(second.continuations_remaining).toBe(50);
-    expect(second.max_wall_clock_seconds).toBe(14400);
+    expect(second.continuations_remaining).toBe(1000000);
+    expect(second.max_wall_clock_seconds).toBe(315360000);
   });
 
   it("rejects empty objective", () => {

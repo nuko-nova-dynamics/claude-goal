@@ -1,6 +1,15 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import { BUDGET_PROFILES, isBudgetProfileInput, type BudgetProfile, type BudgetProfileInput, type BudgetSource, resolveBudgetProfile } from "./budget-profiles.js";
+import {
+  BUDGET_PROFILES,
+  PRACTICAL_UNBOUNDED_CONTINUATIONS,
+  PRACTICAL_UNBOUNDED_WALL_CLOCK_SECONDS,
+  isBudgetProfileInput,
+  type BudgetProfile,
+  type BudgetProfileInput,
+  type BudgetSource,
+  resolveBudgetProfile,
+} from "./budget-profiles.js";
 
 export type GoalStatus = "active" | "paused" | "blocked" | "budget_limited" | "complete" | "abandoned";
 export type PausedReason = "user" | "continuation_cap" | "wall_clock_cap" | "cleared" | "degraded" | "accounting_error";
@@ -71,8 +80,8 @@ export class GoalsRepo {
     const resolvedProfile = input.budget_profile ? resolveBudgetProfile(input.budget_profile, input.objective) : null;
     const profileConfig = resolvedProfile ? BUDGET_PROFILES[resolvedProfile] : null;
     const tokenBudget = profileConfig?.token_budget ?? input.token_budget;
-    const continuationsRemaining = profileConfig?.continuations_remaining ?? 50;
-    const maxWallClockSeconds = profileConfig?.max_wall_clock_seconds ?? 14400;
+    const continuationsRemaining = profileConfig?.continuations_remaining ?? PRACTICAL_UNBOUNDED_CONTINUATIONS;
+    const maxWallClockSeconds = profileConfig?.max_wall_clock_seconds ?? PRACTICAL_UNBOUNDED_WALL_CLOCK_SECONDS;
     const budgetSource: BudgetSource =
       input.budget_profile === "auto" ? "auto" :
       input.budget_profile ? "profile" :
