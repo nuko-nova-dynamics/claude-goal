@@ -1,0 +1,22 @@
+{
+  "name": "claude-goal",
+  "version": "0.2.7",
+  "description": "Codex-style autonomous goal loop with smart budget profiles. Use /goal-start or explicit prose like \"set up a goal\" to run until verified, blocked, or capped.",
+  "author": {
+    "name": "Nuko Nova Dynamics",
+    "email": "hello@nukonova.com"
+  },
+  "homepage": "https://github.com/nuko-nova-dynamics/claude-goal",
+  "repository": "https://github.com/nuko-nova-dynamics/claude-goal",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "autonomous-agent",
+    "goal-tracking",
+    "mcp",
+    "codex-port",
+    "anthropic"
+  ],
+  "mcpServers": "./.mcp.json"
+}

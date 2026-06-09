@@ -1,0 +1,22 @@
+{
+  "name": "claude-goal-mcp",
+  "version": "0.2.7",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && npm run copy-migrations",
+    "copy-migrations": "mkdir -p dist/migrations && cp src/migrations/*.sql dist/migrations/",
+    "dev": "tsc --watch",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "better-sqlite3": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}
