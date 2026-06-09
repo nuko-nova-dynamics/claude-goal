@@ -77,7 +77,7 @@ Anthropic's native `/goal` (CC 2.1.139+) uses a fresh Haiku call per turn as the
 
 But Haiku-as-hook has the same constraint as a prompt hook — it can't read files or run tools. For an objective like "the production build succeeds with no errors," Haiku has to **infer** from transcript language. That's exactly the failure mode the subagent design avoids.
 
-If you want Haiku in the loop for casual goals, **use the native `/goal`**. The two commands coexist. Use `/goal-start` from this plugin when you need tool-verified completion.
+If you want Haiku in the loop for casual goals, **use the native `/goal`**. The two commands coexist. Use `/goal-start` or an explicit "set up a goal" request with this plugin when you need tool-verified completion.
 
 ## What the evaluator cannot do
 

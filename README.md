@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <em>Goal-bounded autonomous turns for Claude Code. Set an objective, pick a budget profile when you need one, walk away.</em>
+  <em>Goal-bounded autonomous turns for Claude Code. Say "set up a goal" or use /goal-start, pick a budget profile when you need one, walk away.</em>
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@
 
 ## What is this
 
-`claude-goal` is a Claude Code plugin that drives the agent through an autonomous loop until a goal is provably met. Type `/goal-start "objective"` and the agent self-iterates — each turn ends in a Stop-hook continuation that feeds the next prompt — until **one** of the following: the model passes its own completion audit, the work is genuinely blocked, a budget profile or raw token budget exhausts, the turn count exhausts, the wall-clock cap exhausts, or you stop it.
+`claude-goal` is a Claude Code plugin that drives the agent through an autonomous loop until a goal is provably met. Type `/goal-start "objective"` or explicitly tell Claude "set up a goal for this and continue" and the agent self-iterates — each turn ends in a Stop-hook continuation that feeds the next prompt — until **one** of the following: the model passes its own completion audit, the work is genuinely blocked, a budget profile or raw token budget exhausts, the turn count exhausts, the wall-clock cap exhausts, or you stop it.
 
 It's a production-grade companion to Claude Code 2.1.139+'s built-in `/goal`. The native command is great for casual conditions; this plugin adds **deterministic budgets, lifecycle controls, `/compact` recovery, persistence across restarts, and a tool-equipped evaluator subagent** that verifies completion by running tests / reading files / checking exit codes — not by trusting the worker's self-narrative.
 
@@ -64,6 +64,9 @@ Run them side-by-side. They don't collide.
 # Start a goal
 /goal-start "list all .ts files under src/ and print a line count for each"
 
+# Natural-language goal starts work too. Claude derives the objective and uses --budget auto.
+set up a goal and refactor the auth module to use async/await, then keep going
+
 # Or pick a run profile. Profiles set token, continuation, and wall-clock caps.
 /goal-start "refactor the auth module to use async/await" --budget standard
 ```
@@ -71,7 +74,7 @@ Run them side-by-side. They don't collide.
 Claude confirms the goal, begins working, and continues across turns without further prompting. When it decides the objective is met, it dispatches the evaluator subagent for verification, then calls `update_goal` and stops.
 
 > [!TIP]
-> Start with profile names, not raw token math: `quick` (500K tokens, 25 turns, 1h), `standard` (2M, 75 turns, 4h), `deep` (5M, 150 turns, 8h), `overnight` (20M, 500 turns, 12h), or `auto` for deterministic objective-based selection. Omitting `--budget` remains unbounded. Raw token numbers still work for advanced tuning. See [`docs/concepts/budgets`](https://nuko-nova-dynamics.github.io/claude-goal/concepts/budgets/) for details.
+> Start with profile names, not raw token math: `quick` (500K tokens, 25 turns, 1h), `standard` (2M, 75 turns, 4h), `deep` (5M, 150 turns, 8h), `overnight` (20M, 500 turns, 12h), or `auto` for deterministic objective-based selection. Omitting `--budget` on `/goal-start` remains unbounded. Explicit natural-language goal starts use `auto` unless you ask for another profile, raw token budget, or unbounded mode. Raw token numbers still work for advanced tuning. See [`docs/concepts/budgets`](https://nuko-nova-dynamics.github.io/claude-goal/concepts/budgets/) for details.
 
 ## How it works
 
@@ -84,7 +87,7 @@ sequenceDiagram
     participant DB as SQLite
     participant Eval as goal-evaluator subagent
 
-    User->>CC: /goal-start "objective" --budget standard
+    User->>CC: /goal-start "objective" or explicit goal request
     CC->>DB: create_goal (status=active)
     loop until done / blocked / paused / capped
         CC->>CC: assistant turn (tools, edits, reasoning)
@@ -121,7 +124,7 @@ sequenceDiagram
 
 **State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, selected budget profile/source, continuation budget, wall-clock usage, and a full audit log in `goal_events`. Schema is migration-versioned through v4, including subagent cursor storage, the `blocked` lifecycle state, and budget profile provenance.
 
-**MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, `update_goal`. Slash-command skills invoke `create_goal`; the worker invokes `update_goal` on completion or a genuine blocker; all other lifecycle ops go through `scripts/goal-cli.sh`.
+**MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, `update_goal`. The `/goal-start` skill and explicit natural-language goal-start requests invoke `create_goal`; the worker invokes `update_goal` on completion or a genuine blocker; all other lifecycle ops go through `scripts/goal-cli.sh`.
 
 </details>
 
@@ -129,7 +132,7 @@ sequenceDiagram
 
 | Command | What it does |
 |---|---|
-| `/goal-start "objective" [--budget quick\|standard\|deep\|overnight\|auto\|N]` | Start a new goal. Omit `--budget` for unbounded. Replaces any prior completed/abandoned goal for this session. |
+| `/goal-start "objective" [--budget quick\|standard\|deep\|overnight\|auto\|N]` or explicit prose like "set up a goal for this" | Start a new goal. Omit `--budget` on slash form for unbounded; explicit prose defaults to `auto`. Replaces any prior completed/abandoned goal for this session. |
 | `/goal-status` | Current goal, status, selected budget profile/source, worker + subagent tokens, continuations remaining, warnings. |
 | `/goal-pause` · `/goal-resume` | User pause/resume, or resume a blocked goal. |
 | `/goal-abandon` (`/goal-stop`) | Abandon permanently. Stops the auto-continuation loop. |
@@ -157,7 +160,7 @@ Updates land via `/plugin update claude-goal` once new versions are tagged.
 
 ```bash
 mkdir -p ~/.claude/plugins/local/claude-goal
-tar -xzf claude-goal-v0.2.3.tar.gz -C ~/.claude/plugins/local/claude-goal
+tar -xzf claude-goal-v0.2.4.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 

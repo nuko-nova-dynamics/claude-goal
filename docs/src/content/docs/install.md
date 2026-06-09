@@ -14,13 +14,13 @@ sidebar:
 /plugin install claude-goal@nuko-nova-tools
 ```
 
-Claude Code clones the plugin, registers the MCP server, and the `/goal-start` skill becomes available immediately. Updates land via `/plugin update claude-goal` once new versions are tagged.
+Claude Code clones the plugin, registers the MCP server, and the `/goal-start` skill plus explicit prose goal requests become available immediately. Updates land via `/plugin update claude-goal` once new versions are tagged.
 
 ## Release tarball (offline / air-gapped)
 
 ```bash
 mkdir -p ~/.claude/plugins/local/claude-goal
-tar -xzf claude-goal-v0.2.3.tar.gz -C ~/.claude/plugins/local/claude-goal
+tar -xzf claude-goal-v0.2.4.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 

@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-`claude-goal` is designed for **hour-long autonomous runs across many turns**. You can leave a goal unbounded, or you can pick a human-sized run profile that sets the token budget, continuation cap, and wall-clock cap together.
+`claude-goal` is designed for **hour-long autonomous runs across many turns**. You can leave a slash-started goal unbounded, pick a human-sized run profile, or explicitly ask Claude to "set up a goal" and let `auto` choose the profile deterministically from the objective.
 
 There are three independent caps. **Any one of them firing pauses the goal.**
 
@@ -29,6 +29,14 @@ Use profile names first. They encode the common envelopes without making users t
 | no `--budget` | unlimited | 50 | 4h | Open-ended exploration you plan to monitor manually. |
 
 `auto` is deterministic, not model-judged. It selects `overnight` only for explicit overnight/weekend-style wording; `deep` for broad migrations, repo-wide refactors, redesigns, integrations, multi-module changes, or many named files; `standard` for bounded features, bug fixes with tests, or medium refactors; and `quick` for small inspection-style work.
+
+Natural-language goal starts use `auto` by default because the user is asking the agent to handle goal setup. Slash form preserves the older default:
+
+```
+/goal-start "inspect config"              # unbounded token budget
+set up a goal to inspect config           # budget_profile=auto -> quick
+set up an unbounded goal to inspect config # unbounded token budget
+```
 
 ## Advanced raw token budgets
 
@@ -145,6 +153,7 @@ stateDiagram-v2
 If you remember nothing else from this page:
 
 - Omit `--budget` for an unbounded token budget.
+- Use explicit prose ("set up a goal to ...") when you want Claude to create the goal and choose `auto`.
 - Use `--budget quick` for small inspection-style tasks.
 - Use `--budget standard` for bounded implementation work.
 - Use `--budget deep` for broad repo work.

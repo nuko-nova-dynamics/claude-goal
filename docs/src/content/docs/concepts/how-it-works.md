@@ -18,7 +18,7 @@ sequenceDiagram
     participant DB as SQLite
     participant E as goal-evaluator
 
-    U->>CC: /goal-start "objective" --budget standard
+    U->>CC: /goal-start "objective" or explicit goal request
     CC->>DB: create_goal (status=active)
     loop until done / blocked / paused / capped
         CC->>CC: assistant turn
@@ -118,7 +118,7 @@ The bundled MCP server (`mcp/goal-server`) exposes three tools:
 
 | Tool | Caller | Effect |
 |---|---|---|
-| `create_goal` | `/goal-start` skill | Insert a new goal row with either `budget_profile` or `token_budget`. Replaces any prior completed/abandoned goal for this session. |
+| `create_goal` | `/goal-start` skill or explicit natural-language goal request | Insert a new goal row with either `budget_profile` or `token_budget`. Replaces any prior completed/abandoned goal for this session. |
 | `get_goal` | Worker, evaluator subagent | Read the active goal — used by the evaluator to learn the objective. |
 | `update_goal` | Worker on completion or genuine blocker | Transition to `complete` or `blocked`. `completed_by` enum distinguishes `self_update` from `evaluator` for completion. |
 

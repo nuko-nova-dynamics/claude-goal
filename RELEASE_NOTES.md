@@ -1,3 +1,38 @@
+# claude-goal v0.2.4
+
+**Natural-language goal starts.**
+
+This release closes the UX gap with Codex-style goals: users can explicitly ask Claude to set up a goal without typing the `/goal-start` slash command.
+
+## What's new
+
+- Explicit prose such as "set up a goal and continue", "make this a goal", or "start a claude-goal for this" now routes through the same persisted `create_goal` path as `/goal-start`.
+- Natural-language goal starts default to `budget_profile="auto"` when no budget is specified, so Claude can set up the run envelope without making users type raw token counts.
+- Slash-command compatibility is preserved: `/goal-start "objective"` with no `--budget` remains unbounded.
+- Users can still request `quick`, `standard`, `deep`, `overnight`, `auto`, raw token budgets, or unbounded mode explicitly.
+- The MCP `create_goal` metadata now mirrors Codex's guardrail: call it only for explicit goal requests, never by silently inferring a goal from ordinary tasks.
+
+## Docs and tests
+
+- README and docs now explain both startup paths, the prose `auto` default, and the unbounded slash default.
+- Added regression tests for the goal-start skill trigger text, MCP tool metadata, and UserPromptExpansion's ordinary-prose no-op boundary.
+
+## Migration notes
+
+- No SQLite schema change from v0.2.3.
+- Existing goals and installed databases continue unchanged.
+
+## Verified locally
+
+- `npm --prefix mcp/goal-server test` - 89 passed
+- `npm --prefix mcp/goal-server run build`
+- `bats $(find tests -name '*.bats' | sort)` - 143 passed
+- `npm --prefix docs run build`
+- `git diff --check`
+- Release tarball SHA-256: `54fc8ce1f4c7722afacc6ec0fc8b5ef24aef4773efd508ffd9ce213cf663a124`
+
+---
+
 # claude-goal v0.2.3
 
 **Evaluator-completion fix for accounting-error pauses.**

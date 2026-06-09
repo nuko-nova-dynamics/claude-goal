@@ -23,6 +23,15 @@ Start a new autonomous goal. Replaces any prior `complete` or `abandoned` goal f
 - `--budget N` — optional advanced form. Sets a raw hard cap on `(tokens_used + subagent_tokens)` and leaves the default continuation/wall-clock caps in place.
 - Omit `--budget` for an unbounded token budget. The default continuation and wall-clock caps still apply.
 
+You can also start a goal with explicit natural language:
+
+```
+set up a goal to refactor the auth module to async/await and keep going
+make this a goal with a deep budget: migrate the billing integration and verify tests
+```
+
+This is intentionally explicit. Ordinary prompts like "fix this bug" do not become goals on their own. When the prose request does not include a budget, Claude calls `create_goal` with `budget_profile=auto`. Ask for unbounded or unlimited mode if you want no token budget.
+
 ### `/goal-status`
 
 ```

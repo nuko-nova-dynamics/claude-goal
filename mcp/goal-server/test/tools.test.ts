@@ -4,6 +4,7 @@ import { GoalsRepo } from "../src/goals-repo.js";
 import { handleGetGoal } from "../src/tools/get-goal.js";
 import { handleCreateGoal } from "../src/tools/create-goal.js";
 import { handleUpdateGoal } from "../src/tools/update-goal.js";
+import { listGoalTools } from "../src/tool-definitions.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,23 @@ function freshRepo() {
   runMigrations(db);
   return new GoalsRepo(db);
 }
+
+describe("tool metadata", () => {
+  it("allows explicit natural-language goal starts without silent inference", () => {
+    const createGoal = listGoalTools("session-from-env").find(tool => tool.name === "create_goal")!;
+
+    expect(createGoal.description).toContain("explicitly asks in natural language");
+    expect(createGoal.description).toContain("do not infer goals from ordinary tasks");
+    expect(createGoal.description).toContain("budget_profile='auto' is the smart default");
+    expect(createGoal.inputSchema.required).toEqual(["objective"]);
+  });
+
+  it("requires session_id when the environment cannot supply one", () => {
+    const createGoal = listGoalTools(null).find(tool => tool.name === "create_goal")!;
+
+    expect(createGoal.inputSchema.required).toEqual(["session_id", "objective"]);
+  });
+});
 
 describe("create_goal tool", () => {
   it("creates and returns the goal", () => {

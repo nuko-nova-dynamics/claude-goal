@@ -16,7 +16,7 @@ export default defineConfig({
       },
       favicon: "/favicon.png",
       description:
-        "Goal-bounded autonomous turns for Claude Code. Set an objective, set a budget, walk away.",
+        "Goal-bounded autonomous turns for Claude Code. Say set up a goal or use /goal-start, set a budget, walk away.",
       social: [
         {
           icon: "github",

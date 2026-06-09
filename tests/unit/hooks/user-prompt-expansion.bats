@@ -37,6 +37,13 @@ setup() {
   [ -z "$output" ] || ! echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
 }
 
+@test "expansion hook on ordinary prose emits no additionalContext" {
+  INPUT='{"session_id":"sess-prose","prompt":"fix this bug and run tests"}'
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/user-prompt-expansion.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || ! echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
+}
+
 @test "expansion hook missing session_id exits 0 silently" {
   INPUT='{"command_name":"goal","expanded_prompt":"x"}'
   run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/user-prompt-expansion.sh"

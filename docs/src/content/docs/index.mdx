@@ -1,9 +1,9 @@
 ---
 title: claude-goal
-description: Goal-bounded autonomous turns for Claude Code. Set an objective, pick a budget profile when you need one, walk away.
+description: Goal-bounded autonomous turns for Claude Code. Say "set up a goal" or use /goal-start, pick a budget profile when you need one, walk away.
 template: splash
 hero:
-  tagline: A production-grade autonomous loop for Claude Code — built around a Stop-hook continuation engine and a tool-equipped completion evaluator. Set an objective, pick a budget profile when you need one, walk away.
+  tagline: A production-grade autonomous loop for Claude Code — built around a Stop-hook continuation engine and a tool-equipped completion evaluator. Say "set up a goal" or use /goal-start, pick a budget profile when you need one, walk away.
   actions:
     - text: Quickstart
       link: /claude-goal/quickstart/
@@ -25,7 +25,7 @@ import { Image } from "astro:assets";
 
 ## What it does
 
-`claude-goal` drives the Claude Code agent through an autonomous loop until a goal is provably met. You set an objective; the plugin self-iterates each turn through a Stop-hook continuation; a tool-equipped evaluator subagent checks completion — not by trusting the worker's self-narrative, but by running tests, reading files, and checking exit codes.
+`claude-goal` drives the Claude Code agent through an autonomous loop until a goal is provably met. You set an objective with `/goal-start` or explicitly ask Claude to "set up a goal"; the plugin self-iterates each turn through a Stop-hook continuation; a tool-equipped evaluator subagent checks completion — not by trusting the worker's self-narrative, but by running tests, reading files, and checking exit codes.
 
 It's the production-grade companion to Claude Code 2.1.139+'s built-in `/goal` — adding deterministic budgets, lifecycle controls, `/compact` recovery, persistence across restarts, and a real verifier.
 
@@ -47,7 +47,7 @@ It's the production-grade companion to Claude Code 2.1.139+'s built-in `/goal` �
   <TabItem label="Tarball">
     ```bash
     mkdir -p ~/.claude/plugins/local/claude-goal
-    tar -xzf claude-goal-v0.2.3.tar.gz \
+    tar -xzf claude-goal-v0.2.4.tar.gz \
       -C ~/.claude/plugins/local/claude-goal
     claude --plugin-dir ~/.claude/plugins/local/claude-goal
     ```
@@ -83,6 +83,12 @@ It's the production-grade companion to Claude Code 2.1.139+'s built-in `/goal` �
 /goal-start "list every .ts file under src/ and print a line count for each"
 ```
 
+Or ask directly:
+
+```
+set up a goal to list every .ts file under src/ and print a line count for each
+```
+
 Claude confirms the goal, begins working, and the Stop hook feeds it a continuation prompt at the end of each turn. When the objective is met, it dispatches the evaluator subagent for verification, then calls `update_goal` and stops.
 
 For a bounded run, pick a profile instead of doing token math:
@@ -91,7 +97,7 @@ For a bounded run, pick a profile instead of doing token math:
 /goal-start "refactor the auth module to use async/await" --budget standard
 ```
 
-`standard` gives the run 2M tokens, 75 continuations, and 4 hours. Omit `--budget` for an unbounded goal, use `auto` for deterministic objective-based selection, or pass a raw token number when you need exact control. See [Budgets and caps](/claude-goal/concepts/budgets/) for the full profile table.
+`standard` gives the run 2M tokens, 75 continuations, and 4 hours. Omit `--budget` on `/goal-start` for an unbounded goal. Explicit prose goal starts use `auto` unless you ask for another profile, raw token budget, or unbounded mode. See [Budgets and caps](/claude-goal/concepts/budgets/) for the full profile table.
 
 ## Deep dive
 

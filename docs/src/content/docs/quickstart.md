@@ -13,12 +13,20 @@ This page walks through a single autonomous goal end-to-end. Five minutes.
 /goal-start "list every .ts file under src/ and print a line count for each"
 ```
 
-Claude confirms the objective and begins working. The plugin has:
+You can also ask explicitly in prose:
+
+```
+set up a goal to list every .ts file under src/ and print a line count for each, then continue
+```
+
+Claude confirms the objective and begins working. For the slash command above, the plugin has:
 
 1. Inserted a row into `goals.db` with `status=active`
 2. Stored the session ID so the Stop hook knows the goal is yours
 3. Initialized `tokens_used=0`, `subagent_tokens=0`, `continuations_remaining=50`, and a 4-hour wall-clock cap
 4. Left `token_budget` empty, because omitted budgets are intentionally unbounded
+
+For explicit prose starts, Claude derives the objective from your request and uses `budget_profile=auto` unless you ask for `quick`, `standard`, `deep`, `overnight`, a raw token budget, or unbounded mode.
 
 ## 2. Watch the loop run
 
