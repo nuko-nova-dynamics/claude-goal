@@ -182,6 +182,7 @@ describe("GoalsRepo.markComplete", () => {
     expect(event.status_after).toBe("complete");
     expect(JSON.parse(event.payload_json)).toMatchObject({
       completed_by: "evaluator",
+      from_status: "paused",
       paused_reason: "accounting_error",
     });
   });
@@ -193,6 +194,39 @@ describe("GoalsRepo.markComplete", () => {
 
     expect(() => repo.markComplete("s1", g.goal_id, "self_update")).toThrow(/accounting_error.*evaluator/);
     expect(repo.getBySession("s1")!.status).toBe("paused");
+  });
+
+  it("allows evaluator completion from budget_limited", () => {
+    const repo = freshRepo();
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: 1000, budget_profile: null });
+    repo.testHelper_setStatus("s1", "budget_limited");
+
+    repo.markComplete("s1", g.goal_id, "evaluator");
+
+    const after = repo.getBySession("s1")!;
+    expect(after.status).toBe("complete");
+    expect(after.paused_reason).toBeNull();
+    expect(after.accounting_uncertain).toBe(0);
+
+    const event = repo["db"]
+      .prepare("SELECT event_type, status_before, status_after, payload_json FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1")
+      .get() as { event_type: string; status_before: string; status_after: string; payload_json: string };
+    expect(event.event_type).toBe("goal_completed_by_evaluator");
+    expect(event.status_before).toBe("budget_limited");
+    expect(event.status_after).toBe("complete");
+    expect(JSON.parse(event.payload_json)).toMatchObject({
+      completed_by: "evaluator",
+      from_status: "budget_limited",
+    });
+  });
+
+  it("rejects self-update completion from budget_limited", () => {
+    const repo = freshRepo();
+    const g = repo.create({ session_id: "s1", objective: "x", token_budget: 1000, budget_profile: null });
+    repo.testHelper_setStatus("s1", "budget_limited");
+
+    expect(() => repo.markComplete("s1", g.goal_id, "self_update")).toThrow(/budget_limited.*evaluator/);
+    expect(repo.getBySession("s1")!.status).toBe("budget_limited");
   });
 
   it("rejects completing an abandoned goal", () => {

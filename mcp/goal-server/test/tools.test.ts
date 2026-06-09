@@ -216,7 +216,30 @@ describe("update_goal tool", () => {
     expect(out.error).toMatch(/completed_by must be/);
   });
 
-  it("does not allow budget_limited goals to be overwritten as complete", () => {
+  it("allows evaluator completion from budget_limited", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: 1000 });
+    repo.pause("s1", repo.getBySession("s1")!.goal_id, "degraded");
+    repo.resume("s1", repo.getBySession("s1")!.goal_id);
+    repo.testHelper_setStatus("s1", "budget_limited");
+
+    const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete", completed_by: "evaluator" });
+
+    expect(out.goal!.status).toBe("complete");
+    expect(out.goal!.paused_reason).toBeNull();
+    const event = repo["db"]
+      .prepare("SELECT event_type, status_before, status_after, payload_json FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1")
+      .get() as { event_type: string; status_before: string; status_after: string; payload_json: string };
+    expect(event.event_type).toBe("goal_completed_by_evaluator");
+    expect(event.status_before).toBe("budget_limited");
+    expect(event.status_after).toBe("complete");
+    expect(JSON.parse(event.payload_json)).toMatchObject({
+      completed_by: "evaluator",
+      from_status: "budget_limited",
+    });
+  });
+
+  it("rejects self-update completion from budget_limited", () => {
     const repo = freshRepo();
     handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: 1000 });
     repo.pause("s1", repo.getBySession("s1")!.goal_id, "degraded");
@@ -225,7 +248,7 @@ describe("update_goal tool", () => {
 
     const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete" });
 
-    expect(out.error).toMatch(/cannot mark complete from status 'budget_limited'/);
+    expect(out.error).toMatch(/budget_limited.*evaluator/);
     expect(repo.getBySession("s1")!.status).toBe("budget_limited");
   });
 

@@ -1,3 +1,24 @@
+# claude-goal v0.2.7
+
+**Evaluator completion can close budget-limit races.**
+
+This release fixes the lifecycle edge case where a goal could finish, have the evaluator verify completion, but remain stuck in `budget_limited` because token-budget enforcement fired just before the evaluator completion call.
+
+## Fixed
+
+- `update_goal status:complete completed_by:"evaluator"` can now close a `budget_limited` goal.
+- Completion events preserve the prior state with `payload.from_status`, so `goal_completed_by_evaluator` remains auditable when it closes `paused` or `budget_limited`.
+- Ordinary worker self-audit completion still cannot bypass `budget_limited` or `paused (accounting_error)`.
+
+## Verification target
+
+- `npm --prefix mcp/goal-server test`
+- `npm --prefix mcp/goal-server run build`
+- `bats $(find tests -name '*.bats' | sort)`
+- `npm --prefix docs run build`
+- `claude plugin validate .`
+- `git diff --check`
+
 # claude-goal v0.2.6
 
 **Large-run envelopes and no hidden short defaults.**

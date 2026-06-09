@@ -26,7 +26,7 @@ function ensureSessionId(args: Record<string, unknown>): string {
 }
 
 const server = new Server(
-  { name: "claude-goal", version: "0.2.6" },
+  { name: "claude-goal", version: "0.2.7" },
   { capabilities: { tools: {} } }
 );
 

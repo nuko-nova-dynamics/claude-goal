@@ -126,7 +126,9 @@ Suppose the goal stalls and burns through the 100M cap:
   continuations remaining: 120 / 1,000
 ```
 
-You have three real options:
+If the evaluator already verified the work as complete, the worker can close the race with `update_goal status:complete completed_by:"evaluator"`. That records `goal_completed_by_evaluator` from `budget_limited` to `complete`. Self-update completion still stays blocked.
+
+If work remains, you have three real options:
 
 **1. Investigate.** Inspect the transcript. Is the model in a loop? Did it misread the task? Is the objective wrong?
 

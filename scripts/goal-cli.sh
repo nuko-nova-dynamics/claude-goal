@@ -415,7 +415,7 @@ case "$SUBCMD" in
 
     PLATFORM="${OSTYPE:-$(uname)}"
     if [[ "$FORMAT" = "json" ]]; then
-      jq -n --arg v "0.2.6" --arg p "$PLATFORM" --argjson c "$CHECKS" --arg o "$OVERALL" \
+      jq -n --arg v "0.2.7" --arg p "$PLATFORM" --argjson c "$CHECKS" --arg o "$OVERALL" \
         '{version:$v, platform:$p, checks:$c, overall:$o}'
     else
       echo "claude-goal doctor: $OVERALL"

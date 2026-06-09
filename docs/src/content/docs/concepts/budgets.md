@@ -78,7 +78,9 @@ This matters for sizing: once a long-running goal has warmed the cache, per-turn
 
 ### Raising a budget mid-run
 
-When a goal reaches `status=budget_limited`, you have two practical options:
+When a goal reaches `status=budget_limited`, first distinguish a real budget stop from a completion race. If the evaluator has already verified the objective as complete, `update_goal status:complete completed_by:"evaluator"` can close the goal and record `goal_completed_by_evaluator`. A worker self-audit cannot bypass `budget_limited`.
+
+If the work still needs to continue, you have two practical options:
 
 **Raise the token budget and resume.** If progress is still useful and the cap was simply too small:
 

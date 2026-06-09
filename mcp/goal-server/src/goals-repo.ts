@@ -141,9 +141,14 @@ export class GoalsRepo {
       if (goal_id && g.goal_id !== goal_id) throw new Error("goal_id mismatch");
       const evaluatorCanCloseAccountingPause =
         g.status === "paused" && g.paused_reason === "accounting_error" && completedBy === "evaluator";
-      if (g.status !== "active" && !evaluatorCanCloseAccountingPause) {
+      const evaluatorCanCloseBudgetLimited =
+        g.status === "budget_limited" && completedBy === "evaluator";
+      if (g.status !== "active" && !evaluatorCanCloseAccountingPause && !evaluatorCanCloseBudgetLimited) {
         if (g.status === "paused" && g.paused_reason === "accounting_error") {
           throw new Error("cannot mark complete from paused accounting_error without evaluator verification");
+        }
+        if (g.status === "budget_limited") {
+          throw new Error("cannot mark complete from budget_limited without evaluator verification");
         }
         throw new Error(`cannot mark complete from status '${g.status}'`);
       }
@@ -164,6 +169,7 @@ export class GoalsRepo {
       // Distinct event types per completion path for audit-trail clarity.
       const eventType = completedBy === "evaluator" ? "goal_completed_by_evaluator" : "goal_completed_by_self_update";
       const payload: Record<string, unknown> = { completed_by: completedBy };
+      if (g.status !== "active") payload.from_status = g.status;
       if (g.paused_reason) payload.paused_reason = g.paused_reason;
       this.recordEvent(session_id, g.goal_id, eventType, g.status, "complete", payload);
     });

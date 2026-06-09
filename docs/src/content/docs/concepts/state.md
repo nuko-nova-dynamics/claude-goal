@@ -130,7 +130,7 @@ When the SessionStart hook detects `source=compact`, it sets `accounting_uncerta
 
 `/goal-reconcile --accept-reset` clears the flag, resets `transcript_cursor` to the current end-of-file, and resumes. You accept that some tokens between `last_advanced_at` and the `/compact` event are lost — the alternative would be to refuse to continue at all, which is worse.
 
-If the evaluator has already verified the goal as complete, `update_goal status:complete completed_by:"evaluator"` can close a `paused (accounting_error)` goal directly. Self-update completion still cannot bypass that pause.
+If the evaluator has already verified the goal as complete, `update_goal status:complete completed_by:"evaluator"` can close a `paused (accounting_error)` goal directly. The same evaluator-only escape hatch applies when token-budget enforcement races with a verified-complete verdict and leaves the row in `budget_limited`. Self-update completion still cannot bypass either guarded state.
 
 ## Surviving `/clear`
 
