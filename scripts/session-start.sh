@@ -77,6 +77,9 @@ log_info "session-start.sh fired (source=$SOURCE)"
 SESSION_ID_ESC=$(sql_escape "$SESSION_ID")
 NOW=$(ms_now)
 
+# v0.2.5 compatibility: recover rows paused by the old per-message usage caps.
+recover_legacy_usage_cap_pause "$SESSION_ID" "session-start" >/dev/null 2>&1 || true
+
 # Look up the goal for this session_id.
 ROW=$(sql_retry "SELECT goal_id, status, COALESCE(resume_at_ms,0), version FROM goals WHERE session_id = '$SESSION_ID_ESC' LIMIT 1;" 2>/dev/null || echo "")
 if [[ -z "$ROW" ]]; then

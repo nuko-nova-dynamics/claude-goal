@@ -2,9 +2,7 @@
 # Token-accounting helpers for claude-goal hooks.
 # Requires: $DB_PATH env var. Source sqlite-retry.sh before sourcing this file.
 
-CAP_INPUT=200000
-CAP_OUTPUT=100000
-CAP_CACHE_CREATE=200000
+MAX_USAGE_FIELD=9007199254740991
 
 # ms_now: cross-platform millisecond timestamp.
 ms_now() {
@@ -17,6 +15,24 @@ ms_now() {
   fi
 }
 
+# read_usage_field LINE FIELD
+# Prints a non-negative integer token count, defaulting missing/null fields to 0.
+# Prints "__invalid__" for malformed usage so callers can pause as accounting_error
+# instead of silently corrupting token accounting.
+read_usage_field() {
+  local line="$1"
+  local field="$2"
+  local value
+  value=$(printf '%s' "$line" | jq -er --arg field "$field" --argjson max "$MAX_USAGE_FIELD" '
+    (.message.usage[$field] // 0) as $v
+    | if ($v | type) == "number" then
+        if $v >= 0 and $v <= $max and (($v | floor) == $v) then ($v | tostring) else "__invalid__" end
+      else "__invalid__"
+      end
+  ' 2>/dev/null || echo "__invalid__")
+  echo "$value"
+}
+
 # tokens_from_jsonl_line: prints token sum for one JSONL line, or "" if not an assistant message.
 tokens_from_jsonl_line() {
   local line="$1"
@@ -27,9 +43,10 @@ tokens_from_jsonl_line() {
   has_usage=$(printf '%s' "$line" | jq 'has("message") and (.message | has("usage"))' 2>/dev/null)
   [[ "$has_usage" != "true" ]] && { echo ""; return 0; }
   local input cache_create output
-  input=$(printf '%s' "$line" | jq -r '.message.usage.input_tokens // 0')
-  cache_create=$(printf '%s' "$line" | jq -r '.message.usage.cache_creation_input_tokens // 0')
-  output=$(printf '%s' "$line" | jq -r '.message.usage.output_tokens // 0')
+  input=$(read_usage_field "$line" "input_tokens")
+  cache_create=$(read_usage_field "$line" "cache_creation_input_tokens")
+  output=$(read_usage_field "$line" "output_tokens")
+  [[ "$input" == "__invalid__" || "$cache_create" == "__invalid__" || "$output" == "__invalid__" ]] && { echo ""; return 0; }
   echo $((input + cache_create + output))
 }
 
@@ -54,7 +71,7 @@ last_uuid_before_offset() {
 # sum_transcript: stream JSONL from start_offset, optionally verify previous uuid.
 # Outputs: "tokens_delta|last_uuid|end_offset|cursor_reset|cap_field"
 #   cursor_reset=1 → caller should re-sum from 0 (transcript was compacted/reset)
-#   cap_field non-empty → a per-field cap was exceeded; caller should pause goal
+#   cap_field non-empty → an invalid usage field was seen; caller should pause goal
 sum_transcript() {
   local transcript="$1"
   local start_offset="$2"
@@ -101,7 +118,7 @@ sum_transcript() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" ]] && continue
 
-    # Per-field cap check for assistant messages.
+    # Usage validation and accounting for assistant messages.
     local type
     type=$(printf '%s' "$line" | jq -r '.type // ""')
     if [[ "$type" == "assistant" ]]; then
@@ -109,20 +126,20 @@ sum_transcript() {
       has_usage=$(printf '%s' "$line" | jq 'has("message") and (.message | has("usage"))' 2>/dev/null)
       if [[ "$has_usage" == "true" ]]; then
         local input cache_create output
-        input=$(printf '%s' "$line" | jq -r '.message.usage.input_tokens // 0')
-        cache_create=$(printf '%s' "$line" | jq -r '.message.usage.cache_creation_input_tokens // 0')
-        output=$(printf '%s' "$line" | jq -r '.message.usage.output_tokens // 0')
+        input=$(read_usage_field "$line" "input_tokens")
+        cache_create=$(read_usage_field "$line" "cache_creation_input_tokens")
+        output=$(read_usage_field "$line" "output_tokens")
 
-        if (( input > CAP_INPUT )); then
+        if [[ "$input" == "__invalid__" ]]; then
           echo "0||$end_offset|0|input_tokens"
           return 0
         fi
-        if (( output > CAP_OUTPUT )); then
-          echo "0||$end_offset|0|output_tokens"
+        if [[ "$cache_create" == "__invalid__" ]]; then
+          echo "0||$end_offset|0|cache_creation_input_tokens"
           return 0
         fi
-        if (( cache_create > CAP_CACHE_CREATE )); then
-          echo "0||$end_offset|0|cache_creation_input_tokens"
+        if [[ "$output" == "__invalid__" ]]; then
+          echo "0||$end_offset|0|output_tokens"
           return 0
         fi
         tokens_delta=$((tokens_delta + input + cache_create + output))
@@ -161,6 +178,75 @@ pause_as_degraded() {
         AND (SELECT changes()) = 1;
     COMMIT;
   " >/dev/null 2>&1
+}
+
+# recover_legacy_usage_cap_pause SESSION_ID HOOK_NAME
+# v0.2.4 and earlier paused valid large usage fields as cap_exceeded. v0.2.5
+# counts those fields normally, so legacy false-positive pauses can recover
+# automatically. Future malformed usage uses invalid_usage_field and is not
+# auto-resumed by this compatibility path.
+recover_legacy_usage_cap_pause() {
+  local session_id="$1"
+  local hook_name="${2:-accounting-core}"
+  [[ -z "$session_id" || ! -f "${DB_PATH:-}" ]] && return 1
+
+  local sid_esc
+  sid_esc=$(sql_escape "$session_id")
+
+  local row
+  row=$(sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" \
+    "SELECT goal_id || '|' || status || '|' || COALESCE(paused_reason,'') || '|' || accounting_uncertain || '|' || version FROM goals WHERE session_id = '$sid_esc';" 2>/dev/null || echo "")
+  [[ -z "$row" ]] && return 1
+
+  local goal_id status paused_reason accounting_uncertain version
+  IFS='|' read -r goal_id status paused_reason accounting_uncertain version <<< "$row"
+  [[ "$status" == "paused" && "$paused_reason" == "accounting_error" && "$accounting_uncertain" == "0" ]] || return 1
+
+  local gid_esc
+  gid_esc=$(sql_escape "$goal_id")
+
+  local latest
+  latest=$(sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
+    SELECT event_type || '|' || COALESCE(json_extract(payload_json, '$.cursor_reset'), 0)
+    FROM goal_events
+    WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc'
+    ORDER BY id DESC
+    LIMIT 1;
+  " 2>/dev/null || echo "")
+  [[ -n "$latest" ]] || return 1
+
+  local event_type cursor_reset
+  IFS='|' read -r event_type cursor_reset <<< "$latest"
+  [[ "$event_type" == "cap_exceeded" && "$cursor_reset" == "0" ]] || return 1
+
+  local now hook_esc result
+  now=$(ms_now)
+  hook_esc=$(sql_escape "$hook_name")
+  result=$(sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
+    BEGIN IMMEDIATE;
+    UPDATE goals SET
+      status = 'active',
+      paused_reason = NULL,
+      resume_at_ms = $now,
+      version = version + 1,
+      updated_at_ms = $now
+    WHERE session_id = '$sid_esc'
+      AND goal_id = '$gid_esc'
+      AND status = 'paused'
+      AND paused_reason = 'accounting_error'
+      AND accounting_uncertain = 0
+      AND version = $version;
+    INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, payload_json, pid, created_at_ms)
+      SELECT '$sid_esc', '$gid_esc', '$hook_esc', 'legacy_usage_cap_recovered', 'paused', 'active',
+        '{\"reason\":\"v0.2.5 removed per-message usage caps\"}', $$, $now
+      WHERE EXISTS (
+        SELECT 1 FROM goals
+        WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $((version + 1))
+      );
+    SELECT changes();
+    COMMIT;
+  " 2>/dev/null || echo "0")
+  [[ "$result" != "0" ]]
 }
 
 # account_advance — DEPRECATED.
@@ -233,8 +319,8 @@ account_subagent_inline() {
       WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $version
         AND status IN ('active', 'budget_limited');
       INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, payload_json, pid, created_at_ms)
-        SELECT '$sid_esc', '$gid_esc', 'accounting-core', 'cap_exceeded', 'active', 'paused',
-          '{\"cap_field\":\"$cap_field\",\"agent_id\":\"$aid_esc\"}', $$, $now
+        SELECT '$sid_esc', '$gid_esc', 'accounting-core', 'invalid_usage_field', 'active', 'paused',
+          '{\"usage_field\":\"$cap_field\",\"agent_id\":\"$aid_esc\"}', $$, $now
         WHERE EXISTS (
           SELECT 1 FROM goals
           WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $((version + 1))
@@ -243,7 +329,7 @@ account_subagent_inline() {
       COMMIT;
     " 2>/dev/null || echo "0")
     if [[ "$CAP_RESULT" = "0" ]]; then
-      log_info "post-tool-batch: version_race_lost (subagent cap_exceeded) session_id=$session_id agent_id=$agent_id"
+      log_info "post-tool-batch: version_race_lost (subagent invalid_usage) session_id=$session_id agent_id=$agent_id"
     fi
     return 0
   fi
@@ -268,8 +354,8 @@ account_subagent_inline() {
         WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $version
           AND status IN ('active', 'budget_limited');
         INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, payload_json, pid, created_at_ms)
-          SELECT '$sid_esc', '$gid_esc', 'accounting-core', 'paused_accounting_error', 'active', 'paused',
-            '{\"cap_field\":\"$cap_field\",\"cursor_reset\":1,\"agent_id\":\"$aid_esc\"}', $$, $now
+          SELECT '$sid_esc', '$gid_esc', 'accounting-core', 'invalid_usage_field', 'active', 'paused',
+            '{\"usage_field\":\"$cap_field\",\"cursor_reset\":1,\"agent_id\":\"$aid_esc\"}', $$, $now
           WHERE EXISTS (
             SELECT 1 FROM goals
             WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $((version + 1))
@@ -278,7 +364,7 @@ account_subagent_inline() {
         COMMIT;
       " 2>/dev/null || echo "0")
       if [[ "$RESET_CAP_RESULT" = "0" ]]; then
-        log_info "post-tool-batch: version_race_lost (subagent cap_exceeded cursor_reset) session_id=$session_id agent_id=$agent_id"
+        log_info "post-tool-batch: version_race_lost (subagent invalid_usage cursor_reset) session_id=$session_id agent_id=$agent_id"
       fi
       return 0
     fi
@@ -399,7 +485,7 @@ account_advance_inline() {
     return 0
   fi
 
-  # Cap exceeded on append path — pause the goal as accounting_error.
+  # Invalid usage on append path — pause the goal as accounting_error.
   # Fix 1: INSERT gated by WHERE EXISTS so it only fires when UPDATE succeeded.
   # Fix 2: status guard added to UPDATE so a concurrent pause isn't overwritten.
   if [[ -n "$cap_field" ]]; then
@@ -416,7 +502,7 @@ account_advance_inline() {
       WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $version
         AND status IN ('active', 'budget_limited');
       INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, payload_json, pid, created_at_ms)
-        SELECT '$sid_esc', '$gid_esc', 'accounting-core', 'cap_exceeded', 'active', 'paused', '{\"cap_field\":\"$cap_field\"}', $$, $now
+        SELECT '$sid_esc', '$gid_esc', 'accounting-core', 'invalid_usage_field', 'active', 'paused', '{\"usage_field\":\"$cap_field\"}', $$, $now
         WHERE EXISTS (
           SELECT 1 FROM goals
           WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $((version + 1))
@@ -425,7 +511,7 @@ account_advance_inline() {
       COMMIT;
     " 2>/dev/null || echo "0")
     if [[ "$RESULT" = "0" ]]; then
-      log_info "post-tool-batch: version_race_lost (cap_exceeded) session_id=$session_id"
+      log_info "post-tool-batch: version_race_lost (invalid_usage) session_id=$session_id"
     fi
     return 0
   fi
@@ -437,8 +523,7 @@ account_advance_inline() {
   if (( cursor_reset == 1 )); then
     result=$(sum_transcript "$transcript" 0 "")
     IFS='|' read -r tokens_delta new_last_uuid end_offset cursor_reset cap_field <<< "$result"
-    # Cap check on full re-sum.
-    # Fix 4: now also inserts paused_accounting_error event, gated by WHERE EXISTS.
+    # Invalid-usage check on full re-sum, gated by WHERE EXISTS.
     # Fix 2: status guard added to UPDATE.
     if [[ -n "$cap_field" ]]; then
       local RESULT
@@ -454,7 +539,7 @@ account_advance_inline() {
         WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $version
           AND status IN ('active', 'budget_limited');
         INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, payload_json, pid, created_at_ms)
-          SELECT '$sid_esc', '$gid_esc', 'accounting-core', 'paused_accounting_error', 'active', 'paused', '{\"cap_field\":\"$cap_field\",\"cursor_reset\":1}', $$, $now
+          SELECT '$sid_esc', '$gid_esc', 'accounting-core', 'invalid_usage_field', 'active', 'paused', '{\"usage_field\":\"$cap_field\",\"cursor_reset\":1}', $$, $now
           WHERE EXISTS (
             SELECT 1 FROM goals
             WHERE session_id = '$sid_esc' AND goal_id = '$gid_esc' AND version = $((version + 1))
@@ -463,7 +548,7 @@ account_advance_inline() {
         COMMIT;
       " 2>/dev/null || echo "0")
       if [[ "$RESULT" = "0" ]]; then
-        log_info "post-tool-batch: version_race_lost (cap_exceeded cursor_reset) session_id=$session_id"
+        log_info "post-tool-batch: version_race_lost (invalid_usage cursor_reset) session_id=$session_id"
       fi
       return 0
     fi

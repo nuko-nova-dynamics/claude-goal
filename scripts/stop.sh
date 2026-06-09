@@ -119,6 +119,7 @@ if [[ "$STOP_HOOK_ACTIVE" != "true" && -n "$LAST_CONT" ]] && (( NOW - LAST_CONT 
 fi
 
 # Step A: ALWAYS run accounting catchup first so the completion turn is recorded
+recover_legacy_usage_cap_pause "$SESSION_ID" "stop" || true
 account_advance_inline "$SESSION_ID" "$TRANSCRIPT" || log_error "stop: accounting failed"
 
 # Step B: detect update_goal in transcript (Stop stdin has no tool_calls field per P19)

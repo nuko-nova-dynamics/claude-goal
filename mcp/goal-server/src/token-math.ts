@@ -7,9 +7,26 @@ export interface Usage {
   output_tokens?: number;
 }
 
+type AccountedUsageField = "input_tokens" | "cache_creation_input_tokens" | "output_tokens";
+
+function normalizeUsageField(u: Usage, field: AccountedUsageField): number | null {
+  const value = u[field];
+  if (value === undefined || value === null) return 0;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    return null;
+  }
+  return value;
+}
+
 export function tokensFromUsage(u: Usage | undefined): number {
   if (!u) return 0;
-  return (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0);
+  const input = normalizeUsageField(u, "input_tokens");
+  const cacheCreate = normalizeUsageField(u, "cache_creation_input_tokens");
+  const output = normalizeUsageField(u, "output_tokens");
+  if (input === null || cacheCreate === null || output === null) {
+    throw new Error("usage token fields must be non-negative integers");
+  }
+  return input + cacheCreate + output;
 }
 
 export interface SumResult {
@@ -17,13 +34,11 @@ export interface SumResult {
   last_uuid: string | null;
   end_byte_offset: number;
   cursor_reset: boolean;
+  // Historical name retained for fixture compatibility. This now means an
+  // invalid token field was seen, not that a valid large token count is too big.
   cap_exceeded: boolean;
   cap_field: string | null;
 }
-
-const CAP_INPUT = 200_000;
-const CAP_OUTPUT = 100_000;
-const CAP_CACHE_CREATE = 200_000;
 
 function lastUuidBeforeByteOffset(buf: Buffer, endByteOffset: number): string | null {
   if (endByteOffset <= 0) return null;
@@ -78,14 +93,10 @@ export function sumTranscript(text: string, startOffset: number, expectedPreviou
 
     if (rec.type === "assistant" && rec.message?.usage) {
       const u: Usage = rec.message.usage;
-      if ((u.input_tokens ?? 0) > CAP_INPUT) {
-        result.cap_exceeded = true; result.cap_field = "input_tokens"; return result;
-      }
-      if ((u.output_tokens ?? 0) > CAP_OUTPUT) {
-        result.cap_exceeded = true; result.cap_field = "output_tokens"; return result;
-      }
-      if ((u.cache_creation_input_tokens ?? 0) > CAP_CACHE_CREATE) {
-        result.cap_exceeded = true; result.cap_field = "cache_creation_input_tokens"; return result;
+      for (const field of ["input_tokens", "output_tokens", "cache_creation_input_tokens"] as const) {
+        if (normalizeUsageField(u, field) === null) {
+          result.cap_exceeded = true; result.cap_field = field; return result;
+        }
       }
       result.tokens_delta += tokensFromUsage(u);
     }

@@ -20,7 +20,7 @@ Claude Code clones the plugin, registers the MCP server, and the `/goal-start` s
 
 ```bash
 mkdir -p ~/.claude/plugins/local/claude-goal
-tar -xzf claude-goal-v0.2.4.tar.gz -C ~/.claude/plugins/local/claude-goal
+tar -xzf claude-goal-v0.2.5.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 

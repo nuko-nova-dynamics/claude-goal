@@ -164,29 +164,64 @@ EOF
   [ "$STATUS" = "budget_limited" ]
 }
 
-@test "advance() pauses on input_tokens cap exceeded" {
+@test "advance() accounts billion-scale input_tokens without pausing" {
   cat > "$TRANSCRIPT" <<'EOF'
-{"type":"assistant","uuid":"u1","message":{"usage":{"input_tokens":300000,"output_tokens":0}}}
+{"type":"assistant","uuid":"u1","message":{"usage":{"input_tokens":2000000000,"output_tokens":0}}}
 EOF
   account_advance_inline "s1" "$TRANSCRIPT"
-  STATUS=$(sqlite3 "$DB_PATH" "SELECT status || '|' || paused_reason FROM goals WHERE session_id='s1';")
-  [ "$STATUS" = "paused|accounting_error" ]
+  ROW=$(sqlite3 "$DB_PATH" "SELECT status || '|' || COALESCE(paused_reason,'') || '|' || tokens_used || '|' || last_accounted_uuid FROM goals WHERE session_id='s1';")
+  [ "$ROW" = "active||2000000000|u1" ]
 }
 
-@test "advance() pauses on output_tokens cap exceeded" {
+@test "advance() accounts large output_tokens without pausing" {
   cat > "$TRANSCRIPT" <<'EOF'
 {"type":"assistant","uuid":"u1","message":{"usage":{"input_tokens":0,"output_tokens":150000}}}
 EOF
   account_advance_inline "s1" "$TRANSCRIPT"
-  STATUS=$(sqlite3 "$DB_PATH" "SELECT status || '|' || paused_reason FROM goals WHERE session_id='s1';")
-  [ "$STATUS" = "paused|accounting_error" ]
+  ROW=$(sqlite3 "$DB_PATH" "SELECT status || '|' || COALESCE(paused_reason,'') || '|' || tokens_used || '|' || last_accounted_uuid FROM goals WHERE session_id='s1';")
+  [ "$ROW" = "active||150000|u1" ]
 }
 
-@test "advance() pauses on cache_creation_input_tokens cap exceeded" {
+@test "advance() accounts large cache_creation_input_tokens without pausing" {
   cat > "$TRANSCRIPT" <<'EOF'
 {"type":"assistant","uuid":"u1","message":{"usage":{"input_tokens":0,"cache_creation_input_tokens":250000,"output_tokens":0}}}
 EOF
   account_advance_inline "s1" "$TRANSCRIPT"
+  ROW=$(sqlite3 "$DB_PATH" "SELECT status || '|' || COALESCE(paused_reason,'') || '|' || tokens_used || '|' || last_accounted_uuid FROM goals WHERE session_id='s1';")
+  [ "$ROW" = "active||250000|u1" ]
+}
+
+@test "advance() pauses on malformed token usage" {
+  cat > "$TRANSCRIPT" <<'EOF'
+{"type":"assistant","uuid":"u1","message":{"usage":{"input_tokens":-1,"output_tokens":0}}}
+EOF
+  account_advance_inline "s1" "$TRANSCRIPT"
   STATUS=$(sqlite3 "$DB_PATH" "SELECT status || '|' || paused_reason FROM goals WHERE session_id='s1';")
   [ "$STATUS" = "paused|accounting_error" ]
+  EVENT=$(sqlite3 "$DB_PATH" "SELECT event_type || '|' || payload_json FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1;")
+  [[ "$EVENT" == invalid_usage_field*input_tokens* ]]
+}
+
+@test "recover_legacy_usage_cap_pause resumes old false-positive cap pauses" {
+  sqlite3 "$DB_PATH" "UPDATE goals SET status='paused', paused_reason='accounting_error', accounting_uncertain=0 WHERE session_id='s1';"
+  sqlite3 "$DB_PATH" "INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, payload_json, created_at_ms)
+    VALUES ('s1', 'g1', 'accounting-core', 'cap_exceeded', 'active', 'paused', '{\"cap_field\":\"cache_creation_input_tokens\"}', $NOW_MS);"
+
+  run recover_legacy_usage_cap_pause "s1" "test-hook"
+  [ "$status" -eq 0 ]
+  ROW=$(sqlite3 "$DB_PATH" "SELECT status || '|' || COALESCE(paused_reason,'') FROM goals WHERE session_id='s1';")
+  [ "$ROW" = "active|" ]
+  EVENT=$(sqlite3 "$DB_PATH" "SELECT event_type FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1;")
+  [ "$EVENT" = "legacy_usage_cap_recovered" ]
+}
+
+@test "recover_legacy_usage_cap_pause does not resume new invalid usage pauses" {
+  sqlite3 "$DB_PATH" "UPDATE goals SET status='paused', paused_reason='accounting_error', accounting_uncertain=0 WHERE session_id='s1';"
+  sqlite3 "$DB_PATH" "INSERT INTO goal_events (session_id, goal_id, hook_name, event_type, status_before, status_after, payload_json, created_at_ms)
+    VALUES ('s1', 'g1', 'accounting-core', 'invalid_usage_field', 'active', 'paused', '{\"usage_field\":\"input_tokens\"}', $NOW_MS);"
+
+  run recover_legacy_usage_cap_pause "s1" "test-hook"
+  [ "$status" -eq 1 ]
+  ROW=$(sqlite3 "$DB_PATH" "SELECT status || '|' || COALESCE(paused_reason,'') FROM goals WHERE session_id='s1';")
+  [ "$ROW" = "paused|accounting_error" ]
 }

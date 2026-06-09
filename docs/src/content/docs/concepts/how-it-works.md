@@ -64,6 +64,8 @@ Cache-**read** tokens are excluded — they don't count against the budget becau
 
 Parent-worker counts go to `goals.tokens_used`. Subagent counts go to `goals.subagent_tokens`, keyed by `agent_id` in `subagent_token_cursors` so each subagent has its own cursor and you can attribute usage per-agent post-hoc.
 
+Large valid usage fields are counted as-is. The accounting layer does not impose small per-message token caps; it only pauses for malformed token usage, cursor uncertainty, explicit token budgets, turn caps, wall-clock caps, or hook failures.
+
 ## 3. Completion and blockers
 
 Completion can fire from either path:

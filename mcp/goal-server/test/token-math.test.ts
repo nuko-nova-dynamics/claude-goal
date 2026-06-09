@@ -27,6 +27,14 @@ describe("tokensFromUsage", () => {
   it("treats missing cache fields as 0", () => {
     expect(tokensFromUsage({ input_tokens: 100, output_tokens: 50 })).toBe(150);
   });
+
+  it("rejects malformed token fields", () => {
+    expect(() => tokensFromUsage({ input_tokens: -1, output_tokens: 0 })).toThrow(/non-negative integers/);
+    expect(() => tokensFromUsage({ input_tokens: 1.5, output_tokens: 0 })).toThrow(/non-negative integers/);
+    expect(() => tokensFromUsage({ input_tokens: Number.POSITIVE_INFINITY, output_tokens: 0 })).toThrow(/non-negative integers/);
+    expect(() => tokensFromUsage({ input_tokens: Number.MAX_SAFE_INTEGER + 1, output_tokens: 0 })).toThrow(/non-negative integers/);
+    expect(() => tokensFromUsage({ input_tokens: "100" as never, output_tokens: 0 })).toThrow(/non-negative integers/);
+  });
 });
 
 describe("sumTranscript", () => {
@@ -66,10 +74,19 @@ describe("sumTranscript", () => {
     expect(r.tokens_delta).toBe(0);
   });
 
-  it("returns capExceeded=true for input_tokens > 200000", () => {
-    const text = JSON.stringify({ type: "assistant", uuid: "u1", message: { usage: { input_tokens: 200001, output_tokens: 0 } } }) + "\n";
+  it("accounts large valid usage fields instead of treating them as accounting errors", () => {
+    const text = JSON.stringify({ type: "assistant", uuid: "u1", message: { usage: { input_tokens: 2_000_000_000, output_tokens: 0 } } }) + "\n";
+    const r = sumTranscript(text, 0, null);
+    expect(r.cap_exceeded).toBe(false);
+    expect(r.tokens_delta).toBe(2_000_000_000);
+    expect(r.last_uuid).toBe("u1");
+  });
+
+  it("flags malformed usage fields as accounting errors", () => {
+    const text = JSON.stringify({ type: "assistant", uuid: "u1", message: { usage: { input_tokens: -1, output_tokens: 0 } } }) + "\n";
     const r = sumTranscript(text, 0, null);
     expect(r.cap_exceeded).toBe(true);
+    expect(r.cap_field).toBe("input_tokens");
   });
 
   it("end_byte_offset matches UTF-8 byte length for non-ASCII content", () => {

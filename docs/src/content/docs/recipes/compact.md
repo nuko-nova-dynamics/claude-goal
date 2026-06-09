@@ -12,7 +12,7 @@ Claude Code's `/compact` rewrites the session transcript JSONL — older message
 1. You run `/compact` during an active goal.
 2. The next time SessionStart fires (on the next session restore or hook trigger), the hook detects `source=compact`.
 3. The active goal's `accounting_uncertain` flag flips to `1`.
-4. The next Stop hook fire warns about uncertain accounting. If a later cursor reset hits an accounting cap, the goal pauses with `paused_reason=accounting_error`.
+4. The next Stop hook fire warns about uncertain accounting. If a later cursor reset finds malformed token usage, the goal pauses with `paused_reason=accounting_error`.
 
 ```
 /goal-status

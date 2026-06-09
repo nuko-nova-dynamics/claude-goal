@@ -62,6 +62,8 @@ If true, the goal transitions to `status=budget_limited` and the hook emits a on
 
 The budget includes **both** worker and subagent tokens. A goal that dispatches a heavy evaluator can still hit the cap.
 
+There is no per-message 200K-style accounting cap. Large valid usage fields are counted normally, so deep goals can run into millions or billions of accounted tokens if their selected budget allows it. The accounting layer pauses only for malformed token usage, cursor uncertainty after transcript rewrites, or the explicit goal budget/caps above.
+
 ### What counts
 
 Tokens are summed from the transcript JSONL as:

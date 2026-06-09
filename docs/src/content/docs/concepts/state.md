@@ -115,6 +115,8 @@ In practice this matters when the worker calls `update_goal status:complete` mid
 | `budget_limit_reported` | One-shot budget-limit prompt emitted |
 | `cap_reached` | Continuation or wall-clock cap reached |
 | `paused_degraded` | Hook caught an unexpected error |
+| `invalid_usage_field` | Transcript usage had a malformed token field; goal paused for accounting safety |
+| `legacy_usage_cap_recovered` | v0.2.5 auto-resumed a goal paused by older per-message usage caps |
 | `final_turn_accounted` | F5 retry captured late completion-turn tokens |
 | `tokens_accounted` | Worker or subagent token cursor advanced |
 
@@ -124,7 +126,7 @@ In practice this matters when the worker calls `update_goal status:complete` mid
 
 Claude Code's `/compact` rewrites the session transcript JSONL — older messages are summarized into a single block, and existing byte cursors into the JSONL become meaningless.
 
-When the SessionStart hook detects `source=compact`, it sets `accounting_uncertain=1` on the active goal and emits a one-shot warning. The Stop hook still drives the loop, but new token accounting is suspect — the cursor is pointed at a different stream now. If a later cursor reset hits an accounting cap, the goal pauses with `paused_reason=accounting_error`.
+When the SessionStart hook detects `source=compact`, it sets `accounting_uncertain=1` on the active goal and emits a one-shot warning. The Stop hook still drives the loop, but new token accounting is suspect — the cursor is pointed at a different stream now. If a later cursor reset finds malformed token usage, the goal pauses with `paused_reason=accounting_error`.
 
 `/goal-reconcile --accept-reset` clears the flag, resets `transcript_cursor` to the current end-of-file, and resumes. You accept that some tokens between `last_advanced_at` and the `/compact` event are lost — the alternative would be to refuse to continue at all, which is worse.
 

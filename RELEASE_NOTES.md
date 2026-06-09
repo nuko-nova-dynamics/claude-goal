@@ -1,3 +1,34 @@
+# claude-goal v0.2.5
+
+**Large-token accounting fix.**
+
+This release fixes the bug where deep goals could pause immediately with `paused_reason=accounting_error` because a single Claude usage field exceeded a hardcoded 200K-style accounting cap.
+
+## Fixed
+
+- Removed the practical per-message caps on `input_tokens`, `output_tokens`, and `cache_creation_input_tokens`.
+- Large valid usage fields are now counted normally, including million- and billion-scale values.
+- The accounting layer now pauses only for malformed token usage, cursor uncertainty, explicit token budgets, turn caps, wall-clock caps, or hook failures.
+- Malformed usage now records `invalid_usage_field` instead of the misleading `cap_exceeded` event.
+- Goals already stuck by the old false-positive `cap_exceeded` event auto-recover on the next Stop or SessionStart hook when there is no `/compact` cursor uncertainty.
+
+## Migration notes
+
+- No SQLite schema change from v0.2.4.
+- Existing valid goals paused by the old per-message usage cap can resume automatically after the plugin is reloaded.
+
+## Verified locally
+
+- `npm --prefix mcp/goal-server test` - 91 passed
+- `npm --prefix mcp/goal-server run build`
+- `bats $(find tests -name '*.bats' | sort)` - 146 passed
+- `npm --prefix docs run build`
+- `git diff --check`
+- `claude plugin validate .`
+- Release tarball SHA-256: `c53a3918d30eda2dab1ef9d2f9a008dcce4950cf352f5a1df2860ec072b0f68f`
+
+---
+
 # claude-goal v0.2.4
 
 **Natural-language goal starts.**
