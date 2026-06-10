@@ -12,7 +12,7 @@ export function listGoalTools(envSessionId: string | null) {
     },
     {
       name: "create_goal",
-      description: "Create a new goal. Only call this when the user explicitly invokes /goal-start or explicitly asks in natural language to set up, start, create, or use a goal; do not infer goals from ordinary tasks. For explicit natural-language goal requests without a user-specified budget, budget_profile='auto' is the smart default. Accept either token_budget or budget_profile, never both. Fails if a goal already exists in 'active', 'paused', 'blocked', or 'budget_limited' status; replaces any 'complete' or 'abandoned' prior goal.",
+      description: "Create a new goal. Only call this when the user explicitly invokes /goal-start or explicitly asks in natural language to set up, start, create, or use a goal; do not infer goals from ordinary tasks. If the user does not explicitly request a budget, limiter, token cap, or profile, omit token_budget and budget_profile so the goal is unbounded. Accept either token_budget or budget_profile, never both. Fails if a goal already exists in 'active', 'paused', 'blocked', or 'budget_limited' status; replaces any 'complete' or 'abandoned' prior goal.",
       inputSchema: {
         type: "object",
         required: envSessionId ? ["objective"] : ["session_id", "objective"],
@@ -21,7 +21,7 @@ export function listGoalTools(envSessionId: string | null) {
           session_id: { type: "string" },
           objective: { type: "string", minLength: 1, maxLength: 4000 },
           token_budget: { type: ["integer", "null"], minimum: 1, description: "Advanced raw token cap. Omit when budget_profile is set." },
-          budget_profile: { type: ["string", "null"], enum: ["quick", "standard", "deep", "overnight", "auto", null], description: "Human-friendly run envelope. Use 'auto' for explicit natural-language goal requests without a user-specified budget. Omit for an unbounded goal or when token_budget is set." },
+          budget_profile: { type: ["string", "null"], enum: ["quick", "standard", "deep", "overnight", "auto", null], description: "Human-friendly run envelope. Use 'auto' only when the user explicitly requests an automatic budget/profile. Omit for an unbounded goal or when token_budget is set." },
         },
       },
     },

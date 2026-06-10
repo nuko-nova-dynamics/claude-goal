@@ -29,6 +29,18 @@ hash_text() {
   printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
 }
 
+wait_for_f5_start() {
+  local log_file="$TMPDIR_TEST/logs/$(date -u +%Y%m%d).log"
+  local i
+  for i in $(seq 1 100); do
+    if [[ -f "$log_file" ]] && grep -q 'running F5 final-turn accounting' "$log_file"; then
+      return 0
+    fi
+    sleep 0.01
+  done
+  return 1
+}
+
 teardown() {
   # Restore the marker file
   if [[ -f "$REPO_ROOT/.runtime-data-dir.bak" ]]; then
@@ -238,7 +250,7 @@ EOF
   # The completion signal is visible, but the usage-bearing final record arrives
   # after the first accounting pass, while stop.sh is in its bounded F5 retry.
   (
-    sleep 0.15
+    wait_for_f5_start
     cat >> "$TRANSCRIPT" <<'EOF'
 {"type":"assistant","uuid":"u2","message":{"role":"assistant","content":[{"type":"text","text":"tool result observed"}],"usage":{"input_tokens":200,"output_tokens":80}}}
 EOF
@@ -260,7 +272,7 @@ EOF
   USER_ONLY_SIZE=$(stat -f%z "$TRANSCRIPT" 2>/dev/null || stat -c%s "$TRANSCRIPT")
   sqlite3 "$DB_PATH" "UPDATE goals SET status='complete', last_accounted_byte_offset = $USER_ONLY_SIZE, last_accounted_uuid = 'u0', tokens_used = 0 WHERE session_id='s1';"
   (
-    sleep 0.15
+    wait_for_f5_start
     cat >> "$TRANSCRIPT" <<'EOF'
 {"type":"assistant","uuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"done"},{"type":"tool_use","name":"update_goal","input":{"status":"complete"}}],"usage":{"input_tokens":200,"output_tokens":80}}}
 EOF

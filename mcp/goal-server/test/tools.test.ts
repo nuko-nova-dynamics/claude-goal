@@ -21,8 +21,9 @@ describe("tool metadata", () => {
 
     expect(createGoal.description).toContain("explicitly asks in natural language");
     expect(createGoal.description).toContain("do not infer goals from ordinary tasks");
-    expect(createGoal.description).toContain("budget_profile='auto' is the smart default");
+    expect(createGoal.description).toContain("omit token_budget and budget_profile so the goal is unbounded");
     expect(createGoal.inputSchema.required).toEqual(["objective"]);
+    expect(createGoal.inputSchema.properties.budget_profile.description).toContain("only when the user explicitly requests");
   });
 
   it("requires session_id when the environment cannot supply one", () => {

@@ -26,7 +26,7 @@ Claude confirms the objective and begins working. For the slash command above, t
 3. Initialized `tokens_used=0`, `subagent_tokens=0`, `continuations_remaining=1000000`, and a 10-year practical-unlimited wall-clock sentinel
 4. Left `token_budget` empty, because omitted budgets are intentionally unbounded
 
-For explicit prose starts, Claude derives the objective from your request and uses `budget_profile=auto` unless you ask for `quick`, `standard`, `deep`, `overnight`, a raw token budget, or unbounded mode.
+For explicit prose starts, Claude derives the objective from your request. It still leaves the goal unbounded unless you explicitly ask for `quick`, `standard`, `deep`, `overnight`, `auto`, or a raw token budget.
 
 ## 2. Watch the loop run
 

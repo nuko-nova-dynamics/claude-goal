@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <em>Goal-bounded autonomous turns for Claude Code. Say "set up a goal" or use /goal-start, pick a budget profile when you need one, walk away.</em>
+  <em>Autonomous goal loops for Claude Code. Say "set up a goal" or use /goal-start; add a budget only when you want a limiter.</em>
 </p>
 
 <p align="center">
@@ -13,7 +13,7 @@
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/github/license/nuko-nova-dynamics/claude-goal?style=flat&color=4a4a4a"></a>
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/actions/workflows/test.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/nuko-nova-dynamics/claude-goal/test.yml?branch=main&style=flat&label=tests"></a>
   <img alt="claude code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=flat">
-  <img alt="tests" src="https://img.shields.io/badge/tests-243_green-4a4a4a?style=flat">
+  <img alt="tests" src="https://img.shields.io/badge/tests-246_green-4a4a4a?style=flat">
 </p>
 
 <p align="center">
@@ -64,7 +64,7 @@ Run them side-by-side. They don't collide.
 # Start a goal
 /goal-start "list all .ts files under src/ and print a line count for each"
 
-# Natural-language goal starts work too. Claude derives the objective and uses --budget auto.
+# Natural-language goal starts work too. Claude derives the objective; no budget is set unless you ask.
 set up a goal and refactor the auth module to use async/await, then keep going
 
 # Or pick a run profile. Profiles set token, continuation, and wall-clock caps.
@@ -74,7 +74,7 @@ set up a goal and refactor the auth module to use async/await, then keep going
 Claude confirms the goal, begins working, and continues across turns without further prompting. When it decides the objective is met, it dispatches the evaluator subagent for verification, then calls `update_goal` and stops.
 
 > [!TIP]
-> Start with profile names, not raw token math: `quick` (2M tokens, 50 turns, 2h), `standard` (10M, 200 turns, 8h), `deep` (100M, 1,000 turns, 24h), `overnight` (1B, 5,000 turns, 72h), or `auto` for deterministic objective-based selection. Omitting `--budget` on `/goal-start` remains practical-unlimited for token, turn, and wall-clock budget. Explicit natural-language goal starts use `auto` unless you ask for another profile, raw token budget, or unbounded mode. Raw token numbers still work for advanced tuning. See [`docs/concepts/budgets`](https://nuko-nova-dynamics.github.io/claude-goal/concepts/budgets/) for details.
+> Omit `--budget` for unbounded token, turn, and wall-clock limits. Add a limiter only when you want one: `quick` (2M tokens, 50 turns, 2h), `standard` (10M, 200 turns, 8h), `deep` (100M, 1,000 turns, 24h), `overnight` (1B, 5,000 turns, 72h), `auto` for deterministic objective-based selection, or a raw token number for advanced tuning. Explicit natural-language goal starts follow the same rule: no explicit budget means unbounded. See [`docs/concepts/budgets`](https://nuko-nova-dynamics.github.io/claude-goal/concepts/budgets/) for details.
 
 ## How it works
 
@@ -132,7 +132,7 @@ sequenceDiagram
 
 | Command | What it does |
 |---|---|
-| `/goal-start "objective" [--budget quick\|standard\|deep\|overnight\|auto\|N]` or explicit prose like "set up a goal for this" | Start a new goal. Omit `--budget` on slash form for unbounded; explicit prose defaults to `auto`. Replaces any prior completed/abandoned goal for this session. |
+| `/goal-start "objective" [--budget quick\|standard\|deep\|overnight\|auto\|N]` or explicit prose like "set up a goal for this" | Start a new goal. Omit `--budget` or omit any prose budget request for unbounded. Replaces any prior completed/abandoned goal for this session. |
 | `/goal-status` | Current goal, status, selected budget profile/source, worker + subagent tokens, continuations remaining, warnings. |
 | `/goal-pause` · `/goal-resume` | User pause/resume, or resume a blocked goal. |
 | `/goal-abandon` (`/goal-stop`) | Abandon permanently. Stops the auto-continuation loop. |
@@ -160,7 +160,7 @@ Updates land via `/plugin update claude-goal` once new versions are tagged.
 
 ```bash
 mkdir -p ~/.claude/plugins/local/claude-goal
-tar -xzf claude-goal-v0.2.7.tar.gz -C ~/.claude/plugins/local/claude-goal
+tar -xzf claude-goal-v0.2.8.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 

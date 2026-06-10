@@ -47,7 +47,7 @@ It's the production-grade companion to Claude Code 2.1.139+'s built-in `/goal` â
   <TabItem label="Tarball">
     ```bash
     mkdir -p ~/.claude/plugins/local/claude-goal
-    tar -xzf claude-goal-v0.2.7.tar.gz \
+    tar -xzf claude-goal-v0.2.8.tar.gz \
       -C ~/.claude/plugins/local/claude-goal
     claude --plugin-dir ~/.claude/plugins/local/claude-goal
     ```
@@ -97,7 +97,7 @@ For a bounded run, pick a profile instead of doing token math:
 /goal-start "refactor the auth module to use async/await" --budget standard
 ```
 
-`standard` gives the run 10M tokens, 200 continuations, and 8 hours. Omit `--budget` on `/goal-start` for practical-unlimited token, turn, and wall-clock budget. Explicit prose goal starts use `auto` unless you ask for another profile, raw token budget, or unbounded mode. See [Budgets and caps](/claude-goal/concepts/budgets/) for the full profile table.
+`standard` gives the run 10M tokens, 200 continuations, and 8 hours. Omit `--budget` on `/goal-start`, or omit budget wording in explicit prose, for practical-unlimited token, turn, and wall-clock budget. Use `auto` only when you explicitly want deterministic profile selection. See [Budgets and caps](/claude-goal/concepts/budgets/) for the full profile table.
 
 ## Deep dive
 

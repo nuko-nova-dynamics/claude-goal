@@ -1,3 +1,26 @@
+# claude-goal v0.2.8
+
+**Goals are unbounded unless the user explicitly asks for a limiter.**
+
+This release changes the natural-language goal-start UX to match the slash-command default: omitted budgets now mean practical-unlimited token, continuation, and wall-clock envelopes. The `auto` profile remains available, but only when the user explicitly asks for it.
+
+## Changed
+
+- Explicit prose such as "set up a goal and continue" now omits both `token_budget` and `budget_profile` unless the user asks for a budget, limiter, token cap, or profile.
+- `/goal-start "objective"` remains unbounded by default.
+- `--budget quick|standard|deep|overnight|auto` and raw token budgets remain supported.
+- MCP tool metadata and the `/goal-start` skill now tell agents that `auto` is explicit, not a hidden default.
+- README and docs now lead with "unbounded by default" for both slash and prose starts.
+
+## Verification target
+
+- `npm --prefix mcp/goal-server test`
+- `npm --prefix mcp/goal-server run build`
+- `bats $(find tests -name '*.bats' | sort)`
+- `npm --prefix docs run build`
+- `claude plugin validate .`
+- `git diff --check`
+
 # claude-goal v0.2.7
 
 **Evaluator completion can close budget-limit races.**

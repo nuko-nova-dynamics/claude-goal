@@ -23,10 +23,9 @@ Determine the objective:
 
 Determine the budget:
 
-- Slash form without `--budget`: omit both `token_budget` and `budget_profile`; the goal is unbounded for backward compatibility.
-- Natural-language form without an explicit budget: set `budget_profile` to `auto`; this gives explicit prose goal requests the smart-budget UX the user asked for.
+- If the user did not explicitly ask for a budget, limiter, cap, token count, or profile: omit both `token_budget` and `budget_profile`; the goal is unbounded. This applies to slash form and natural-language form.
 - If the user explicitly asks for no budget, unbounded, or unlimited: omit both `token_budget` and `budget_profile`.
-- If the user provides `quick`, `standard`, `deep`, `overnight`, or `auto`: set `budget_profile` to that string and omit `token_budget`.
+- If the user explicitly provides `quick`, `standard`, `deep`, `overnight`, or `auto` as the budget/profile: set `budget_profile` to that string and omit `token_budget`.
 - If the user provides a positive integer token budget: set `token_budget` to that integer and omit `budget_profile`.
 - If a budget value is anything else: report that the budget must be a positive integer or one of `quick`, `standard`, `deep`, `overnight`, `auto`.
 

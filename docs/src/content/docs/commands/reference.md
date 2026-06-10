@@ -30,7 +30,7 @@ set up a goal to refactor the auth module to async/await and keep going
 make this a goal with a deep budget: migrate the billing integration and verify tests
 ```
 
-This is intentionally explicit. Ordinary prompts like "fix this bug" do not become goals on their own. When the prose request does not include a budget, Claude calls `create_goal` with `budget_profile=auto`. Ask for unbounded or unlimited mode if you want no token budget.
+This is intentionally explicit. Ordinary prompts like "fix this bug" do not become goals on their own. When the prose request does not include a budget, Claude calls `create_goal` without `token_budget` or `budget_profile`, so the goal is unbounded. Ask for `quick`, `standard`, `deep`, `overnight`, `auto`, or a raw token number only when you want a limiter.
 
 ### `/goal-status`
 
