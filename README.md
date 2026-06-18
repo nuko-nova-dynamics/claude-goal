@@ -13,7 +13,7 @@
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/github/license/nuko-nova-dynamics/claude-goal?style=flat&color=4a4a4a"></a>
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/actions/workflows/test.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/nuko-nova-dynamics/claude-goal/test.yml?branch=main&style=flat&label=tests"></a>
   <img alt="claude code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=flat">
-  <img alt="tests" src="https://img.shields.io/badge/tests-246_green-4a4a4a?style=flat">
+  <img alt="tests" src="https://img.shields.io/badge/tests-254_green-4a4a4a?style=flat">
 </p>
 
 <p align="center">
@@ -47,7 +47,7 @@ It's a production-grade companion to Claude Code 2.1.139+'s built-in `/goal`. Th
 | Budget control | phrase in condition | deterministic profiles (`quick`, `standard`, `deep`, `overnight`, `auto`) or raw token caps |
 | Turn / time caps | phrase in condition | practical-unlimited by default; profile-sized hard caps, `/goal-extend` to raise |
 | Pause · resume · abandon | `/goal clear` only | `/goal-pause`, `/goal-resume`, `/goal-abandon` |
-| Blocked-state recovery | prompt-only | `status=blocked`, visible status, `/goal-resume` |
+| Blocked-state recovery | prompt-only | `status=blocked`, visible status, `/goal-resume`, `resume_goal` MCP |
 | `/compact` recovery | n/a | `accounting_uncertain` flag + `/goal-reconcile` |
 | Restart persistence | counters reset | SQLite preserves everything |
 | Completion judgment | fresh Haiku per turn (transcript-only) | dual path — worker self-audit **and** a plugin subagent that verifies with **tools** |
@@ -116,7 +116,7 @@ sequenceDiagram
 
 **Completion — dual path.** The worker can self-audit and call `update_goal status:complete` (`completed_by: "self_update"`). The continuation prompt also instructs the worker to dispatch the `claude-goal:goal-evaluator` subagent before declaring done. The evaluator runs in a fresh context with `Bash + Read + jq + sqlite3` — it reads the objective from the DB, queries real state with tools, and returns `{"verdict":"complete"|"incomplete"|"unverifiable"}`. On `complete`, the worker calls `update_goal completed_by:"evaluator"`, which logs a distinct `goal_completed_by_evaluator` event. Evaluator completion can also close a goal paused by `accounting_error` after `/compact` or a `budget_limited` goal when the token cap races with a verified-complete verdict. Self-update completion cannot bypass those guarded states. The two paths coexist; evaluator is preferred, self-audit is the fallback.
 
-**Blocked state.** If the same blocker repeats across at least three consecutive continuation turns and no meaningful progress is possible without user input or an external-state change, the worker can call `update_goal status:blocked blocked_reason:"..."`. Blocked goals stop auto-continuing, stay visible in status/history, and can be restarted with `/goal-resume`.
+**Blocked state.** If the same blocker repeats across at least three consecutive continuation turns and no meaningful progress is possible without user input or an external-state change, the worker can call `update_goal status:blocked blocked_reason:"..."`. Blocked goals stop auto-continuing, stay visible in status/history, and can be restarted with `/goal-resume` or the `resume_goal` MCP tool.
 
 **Budget / cap enforcement.** At goal creation, a named profile expands into a token budget, continuation cap, and wall-clock cap; raw token budgets remain token-only. At the start of each Stop hook run, the hook checks `(tokens_used + subagent_tokens) >= token_budget`, `continuations_remaining <= 0`, and elapsed wall-clock. Token-budget breaches transition to `budget_limited`; continuation and wall-clock caps transition to `paused` with `paused_reason` set.
 
@@ -124,7 +124,7 @@ sequenceDiagram
 
 **State store.** All goal state lives in SQLite at `${CLAUDE_PLUGIN_DATA}/goals.db` (WAL mode). The `goals` table records status, token counts, selected budget profile/source, continuation budget, wall-clock usage, and a full audit log in `goal_events`. Schema is migration-versioned through v5, including subagent cursor storage, the `blocked` lifecycle state, budget profile provenance, and large-run defaults.
 
-**MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, `update_goal`. The `/goal-start` skill and explicit natural-language goal-start requests invoke `create_goal`; the worker invokes `update_goal` on completion or a genuine blocker; all other lifecycle ops go through `scripts/goal-cli.sh`.
+**MCP tools.** The bundled MCP server (`mcp/goal-server`) exposes `create_goal`, `get_goal`, `update_goal`, `resume_goal`, and `abandon_goal`. The `/goal-start` skill and explicit natural-language goal-start requests invoke `create_goal`; the worker invokes `update_goal` on completion or a genuine blocker; `resume_goal` and `abandon_goal` recover blocked or conflicting rows when the user explicitly asks to continue or replace them. Pause, extend, reconcile, cleanup, history, and doctor remain slash-command/CLI operations.
 
 </details>
 
@@ -160,7 +160,7 @@ Updates land via `/plugin update claude-goal` once new versions are tagged.
 
 ```bash
 mkdir -p ~/.claude/plugins/local/claude-goal
-tar -xzf claude-goal-v0.2.8.tar.gz -C ~/.claude/plugins/local/claude-goal
+tar -xzf claude-goal-v0.2.9.tar.gz -C ~/.claude/plugins/local/claude-goal
 claude --plugin-dir ~/.claude/plugins/local/claude-goal
 ```
 

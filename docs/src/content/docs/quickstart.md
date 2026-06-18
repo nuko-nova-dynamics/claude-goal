@@ -101,7 +101,7 @@ The goal transitions to `abandoned`, the Stop hook stops injecting continuations
 
 1. **Stop hook** drove the agent across turns by emitting continuation prompts.
 2. **PostToolBatch hook** sat in the background, summing tokens after every tool batch.
-3. **MCP server** (the `claude-goal` MCP) gave the worker `create_goal` / `get_goal` / `update_goal` tools.
+3. **MCP server** (the `claude-goal` MCP) gave the worker `create_goal` / `get_goal` / `update_goal` tools, plus `resume_goal` / `abandon_goal` for explicit blocked-goal recovery.
 4. **Evaluator subagent** (would have) verified the objective by querying the DB and running tools before marking complete.
 5. **F5 final-turn retry** caught the completion turn's tokens after `update_goal` fired.
 

@@ -5,6 +5,8 @@ allowed-tools:
   - mcp__plugin_claude-goal_goal__create_goal
   - mcp__plugin_claude-goal_goal__get_goal
   - mcp__plugin_claude-goal_goal__update_goal
+  - mcp__plugin_claude-goal_goal__resume_goal
+  - mcp__plugin_claude-goal_goal__abandon_goal
   - Agent
 ---
 
@@ -36,7 +38,9 @@ Call the `create_goal` MCP tool with:
 
 After the tool returns:
 - If success: briefly confirm the goal is active, restate the objective, mention the budget profile or token budget if any, then begin work.
-- If error: report the error to the user verbatim.
+- If `create_goal` fails because a goal already exists in `blocked` or resumable `paused` status, inspect the user's wording. If they explicitly asked to continue, unblock, recover, or resume that existing goal, call `resume_goal` and continue work on that goal. If they explicitly asked to replace, reset, discard, stop, or abandon the existing goal, call `abandon_goal`, then call `create_goal` again with the new objective. If their intent is not explicit, report the error and ask whether to resume or abandon.
+- If `create_goal` fails for an active or budget-limited goal, report the error and ask for the appropriate lifecycle action instead of guessing.
+- For any other error: report the error to the user verbatim.
 
 From now until the goal is marked complete, after every turn the system will inject a continuation prompt. Keep working toward the objective.
 

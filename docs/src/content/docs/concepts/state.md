@@ -109,9 +109,9 @@ In practice this matters when the worker calls `update_goal status:complete` mid
 | `goal_completed_by_self_update` | Worker called `update_goal status:complete` directly |
 | `goal_completed_by_evaluator` | Worker called `update_goal completed_by:"evaluator"` after a `complete` verdict |
 | `goal_blocked` | Worker called `update_goal status:blocked` after a repeated blocker |
-| `goal_abandoned` | `/goal-abandon` |
+| `goal_abandoned` | `/goal-abandon` or `abandon_goal` |
 | `goal_paused` | `/goal-pause` or repo pause path |
-| `goal_resumed` | `/goal-resume` |
+| `goal_resumed` | `/goal-resume` or `resume_goal` |
 | `budget_limit_reported` | One-shot budget-limit prompt emitted |
 | `cap_reached` | Continuation or wall-clock cap reached |
 | `paused_degraded` | Hook caught an unexpected error |

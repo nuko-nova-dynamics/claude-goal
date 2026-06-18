@@ -116,15 +116,17 @@ The `goals` table has a unique constraint on `session_id` for active goals, so a
 
 ## 7. MCP tools
 
-The bundled MCP server (`mcp/goal-server`) exposes three tools:
+The bundled MCP server (`mcp/goal-server`) exposes five tools:
 
 | Tool | Caller | Effect |
 |---|---|---|
 | `create_goal` | `/goal-start` skill or explicit natural-language goal request | Insert a new goal row with either `budget_profile` or `token_budget`. Replaces any prior completed/abandoned goal for this session. |
 | `get_goal` | Worker, evaluator subagent | Read the active goal — used by the evaluator to learn the objective. |
 | `update_goal` | Worker on completion or genuine blocker | Transition to `complete` or `blocked`. `completed_by` enum distinguishes `self_update` from `evaluator` for completion. |
+| `resume_goal` | Worker when the user explicitly asks to continue a blocked/resumable paused goal | Transition a blocked or user/degraded paused goal back to `active`. |
+| `abandon_goal` | Worker when the user explicitly asks to stop, reset, replace, or discard the current goal | Transition an active, paused, blocked, or budget-limited goal to `abandoned` so a replacement can be created. |
 
-All other lifecycle operations (`pause`, `resume`, `abandon`, `extend`, `reconcile`, `cleanup`, `history`, `doctor`) go through `scripts/goal-cli.sh` — they're slash-command skills, not MCP tools.
+Pause, extend, reconcile, cleanup, history, and doctor remain `scripts/goal-cli.sh` slash-command operations.
 
 ## Reading the code
 

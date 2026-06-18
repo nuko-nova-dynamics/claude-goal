@@ -41,5 +41,31 @@ export function listGoalTools(envSessionId: string | null) {
         },
       },
     },
+    {
+      name: "resume_goal",
+      description: "Resume the current goal when it is blocked or user/degraded paused. Use this when the user has resolved the blocker or explicitly asks to continue a blocked goal; do not use it to bypass continuation, wall-clock, or token-budget caps.",
+      inputSchema: {
+        type: "object",
+        required: envSessionId ? [] : ["session_id"],
+        additionalProperties: false,
+        properties: {
+          session_id: { type: "string" },
+          goal_id: { type: ["string", "null"] },
+        },
+      },
+    },
+    {
+      name: "abandon_goal",
+      description: "Abandon the current active, paused, blocked, or budget-limited goal so the session can stop or start a replacement goal. Use only when the user explicitly asks to stop, abandon, discard, replace, or reset the current goal.",
+      inputSchema: {
+        type: "object",
+        required: envSessionId ? [] : ["session_id"],
+        additionalProperties: false,
+        properties: {
+          session_id: { type: "string" },
+          goal_id: { type: ["string", "null"] },
+        },
+      },
+    },
   ];
 }

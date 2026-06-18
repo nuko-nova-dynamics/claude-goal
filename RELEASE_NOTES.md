@@ -1,3 +1,25 @@
+# claude-goal v0.2.9
+
+**Blocked goals are recoverable through MCP tools.**
+
+This release fixes the recovery gap where a session with a `blocked` goal could reject `create_goal`, reject `update_goal status:complete`, and leave the worker unable to resume or abandon the existing row unless the user manually ran a slash command.
+
+## Fixed
+
+- Added `resume_goal` so an explicitly resumed blocked or user/degraded-paused goal can transition back to `active` from MCP.
+- Added `abandon_goal` so an explicitly replaced, reset, stopped, or discarded active/paused/blocked/budget-limited goal can transition to `abandoned` from MCP.
+- Updated `/goal-start` skill permissions and instructions so blocked-goal collisions can be resolved by tool when the user intent is explicit.
+- Updated prompt-expansion context, docs, and tool metadata to list the recovery tools.
+
+## Verification target
+
+- `npm --prefix mcp/goal-server test`
+- `npm --prefix mcp/goal-server run build`
+- `bats $(find tests -name '*.bats' | sort)`
+- `npm --prefix docs run build`
+- `claude plugin validate .`
+- `git diff --check`
+
 # claude-goal v0.2.8
 
 **Goals are unbounded unless the user explicitly asks for a limiter.**

@@ -139,14 +139,14 @@ stateDiagram-v2
     [*] --> active
     active --> complete: update_goal status=complete
     active --> blocked: update_goal status=blocked
-    active --> abandoned: /goal-abandon
+    active --> abandoned: /goal-abandon or abandon_goal
     active --> paused: /goal-pause (user)
     active --> budget_limited: budget breach
     active --> paused: continuation_cap / wall_clock_cap
     active --> paused: hook error (degraded)
 
-    paused --> active: /goal-resume or /goal-extend
-    blocked --> active: /goal-resume
+    paused --> active: /goal-resume, resume_goal, or /goal-extend
+    blocked --> active: /goal-resume or resume_goal
     budget_limited --> active: /goal-extend --add-tokens
     complete --> [*]
     abandoned --> [*]

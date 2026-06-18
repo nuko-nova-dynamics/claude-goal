@@ -11,7 +11,7 @@ export function handleUpdateGoal(
   }
 ): { goal?: Goal; error?: string } {
   if (args.status !== "complete" && args.status !== "blocked") {
-    return { error: "update_goal can only set status to 'complete' or 'blocked'; use slash commands for pause/resume/abandon" };
+    return { error: "update_goal can only set status to 'complete' or 'blocked'; use resume_goal or abandon_goal for recovery, and slash commands for pause/extend/reconcile/history/doctor" };
   }
   if (args.status === "blocked") {
     if (args.completed_by) {

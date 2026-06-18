@@ -4,6 +4,8 @@ import { GoalsRepo } from "../src/goals-repo.js";
 import { handleGetGoal } from "../src/tools/get-goal.js";
 import { handleCreateGoal } from "../src/tools/create-goal.js";
 import { handleUpdateGoal } from "../src/tools/update-goal.js";
+import { handleResumeGoal } from "../src/tools/resume-goal.js";
+import { handleAbandonGoal } from "../src/tools/abandon-goal.js";
 import { listGoalTools } from "../src/tool-definitions.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,8 +30,23 @@ describe("tool metadata", () => {
 
   it("requires session_id when the environment cannot supply one", () => {
     const createGoal = listGoalTools(null).find(tool => tool.name === "create_goal")!;
+    const resumeGoal = listGoalTools(null).find(tool => tool.name === "resume_goal")!;
+    const abandonGoal = listGoalTools(null).find(tool => tool.name === "abandon_goal")!;
 
     expect(createGoal.inputSchema.required).toEqual(["session_id", "objective"]);
+    expect(resumeGoal.inputSchema.required).toEqual(["session_id"]);
+    expect(abandonGoal.inputSchema.required).toEqual(["session_id"]);
+  });
+
+  it("exposes lifecycle recovery tools for blocked goals", () => {
+    const tools = listGoalTools("session-from-env");
+    const resumeGoal = tools.find(tool => tool.name === "resume_goal")!;
+    const abandonGoal = tools.find(tool => tool.name === "abandon_goal")!;
+
+    expect(resumeGoal.description).toContain("blocked");
+    expect(resumeGoal.inputSchema.required).toEqual([]);
+    expect(abandonGoal.description).toContain("replacement goal");
+    expect(abandonGoal.inputSchema.required).toEqual([]);
   });
 });
 
@@ -294,5 +311,78 @@ describe("update_goal tool", () => {
 
     expect(out.error).toMatch(/1000 characters/);
     expect(repo.getBySession("s1")!.status).toBe("active");
+  });
+});
+
+describe("resume_goal tool", () => {
+  it("resumes a blocked goal", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    handleUpdateGoal(repo, { session_id: "s1", status: "blocked", blocked_reason: "waiting" });
+
+    const out = handleResumeGoal(repo, { session_id: "s1" });
+
+    expect(out.goal!.status).toBe("active");
+    const event = repo["db"]
+      .prepare("SELECT event_type, status_before, status_after FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1")
+      .get() as { event_type: string; status_before: string; status_after: string };
+    expect(event).toMatchObject({
+      event_type: "goal_resumed",
+      status_before: "blocked",
+      status_after: "active",
+    });
+  });
+
+  it("respects goal_id mismatch protection", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    handleUpdateGoal(repo, { session_id: "s1", status: "blocked", blocked_reason: "waiting" });
+
+    const out = handleResumeGoal(repo, { session_id: "s1", goal_id: "wrong" });
+
+    expect(out.error).toMatch(/goal_id mismatch/);
+    expect(repo.getBySession("s1")!.status).toBe("blocked");
+  });
+
+  it("rejects resume when there is no resumable goal", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+
+    expect(handleResumeGoal(repo, { session_id: "s1" }).error).toMatch(/cannot resume from status 'active'/);
+    expect(handleResumeGoal(repo, { session_id: "missing" }).error).toMatch(/no goal exists/);
+  });
+});
+
+describe("abandon_goal tool", () => {
+  it("abandons a blocked goal so a replacement can be created", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "first", token_budget: null });
+    handleUpdateGoal(repo, { session_id: "s1", status: "blocked", blocked_reason: "waiting" });
+
+    const out = handleAbandonGoal(repo, { session_id: "s1" });
+
+    expect(out.goal!.status).toBe("abandoned");
+    const replacement = handleCreateGoal(repo, { session_id: "s1", objective: "second", token_budget: null });
+    expect(replacement.goal!.status).toBe("active");
+    expect(replacement.goal!.objective).toBe("second");
+  });
+
+  it("respects goal_id mismatch protection", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+
+    const out = handleAbandonGoal(repo, { session_id: "s1", goal_id: "wrong" });
+
+    expect(out.error).toMatch(/goal_id mismatch/);
+    expect(repo.getBySession("s1")!.status).toBe("active");
+  });
+
+  it("rejects abandon when there is no abandonable goal", () => {
+    const repo = freshRepo();
+    expect(handleAbandonGoal(repo, { session_id: "missing" }).error).toMatch(/no goal to abandon/);
+
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    handleUpdateGoal(repo, { session_id: "s1", status: "complete" });
+    expect(handleAbandonGoal(repo, { session_id: "s1" }).error).toMatch(/no goal to abandon/);
   });
 });

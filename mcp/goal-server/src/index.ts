@@ -6,6 +6,8 @@ import { GoalsRepo } from "./goals-repo.js";
 import { handleGetGoal } from "./tools/get-goal.js";
 import { handleCreateGoal } from "./tools/create-goal.js";
 import { handleUpdateGoal } from "./tools/update-goal.js";
+import { handleResumeGoal } from "./tools/resume-goal.js";
+import { handleAbandonGoal } from "./tools/abandon-goal.js";
 import { listGoalTools } from "./tool-definitions.js";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -26,7 +28,7 @@ function ensureSessionId(args: Record<string, unknown>): string {
 }
 
 const server = new Server(
-  { name: "claude-goal", version: "0.2.8" },
+  { name: "claude-goal", version: "0.2.9" },
   { capabilities: { tools: {} } }
 );
 
@@ -48,6 +50,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       break;
     case "update_goal":
       result = handleUpdateGoal(repo, args as { session_id: string; goal_id?: string; status: "complete" | "blocked"; completed_by?: "self_update" | "evaluator"; blocked_reason?: string | null });
+      break;
+    case "resume_goal":
+      result = handleResumeGoal(repo, args as { session_id: string; goal_id?: string | null });
+      break;
+    case "abandon_goal":
+      result = handleAbandonGoal(repo, args as { session_id: string; goal_id?: string | null });
       break;
     default:
       throw new Error(`unknown tool: ${req.params.name}`);

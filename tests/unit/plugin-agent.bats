@@ -42,3 +42,9 @@ setup() {
   grep -q 'omit token_budget and budget_profile so the goal is unbounded' "$REPO_ROOT/mcp/goal-server/src/tool-definitions.ts"
   ! grep -q "budget_profile='auto' is the smart default" "$REPO_ROOT/mcp/goal-server/src/tool-definitions.ts"
 }
+
+@test "goal-start skill allows blocked-goal MCP recovery" {
+  grep -q 'mcp__plugin_claude-goal_goal__resume_goal' "$REPO_ROOT/skills/goal-start/SKILL.md"
+  grep -q 'mcp__plugin_claude-goal_goal__abandon_goal' "$REPO_ROOT/skills/goal-start/SKILL.md"
+  grep -q 'If `create_goal` fails because a goal already exists in `blocked`' "$REPO_ROOT/skills/goal-start/SKILL.md"
+}

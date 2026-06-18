@@ -1,6 +1,6 @@
 {
   "name": "claude-goal",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Codex-style autonomous goal loop with smart budget profiles. Use /goal-start or explicit prose like \"set up a goal\" to run until verified, blocked, or capped.",
   "author": {
     "name": "Nuko Nova Dynamics",

@@ -20,6 +20,6 @@ esac
 jq -n --arg sid "$SESSION_ID" '{
   hookSpecificOutput: {
     hookEventName: "UserPromptExpansion",
-    additionalContext: ("When calling claude-goal MCP tools, use session_id=\"" + $sid + "\".")
+    additionalContext: ("When calling claude-goal MCP tools (create_goal, get_goal, update_goal, resume_goal, abandon_goal), use session_id=\"" + $sid + "\".")
   }
 }'
