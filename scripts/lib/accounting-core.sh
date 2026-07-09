@@ -51,21 +51,18 @@ tokens_from_jsonl_line() {
 }
 
 # last_uuid_before_offset: return the last JSONL uuid before byte offset.
+# Single jq pass over the prefix (the old per-line loop spawned one jq
+# process per JSONL line, which dominated hook latency on long transcripts).
 last_uuid_before_offset() {
   local transcript="$1"
   local end_offset="$2"
-  local last_uuid=""
 
   (( end_offset <= 0 )) && { echo ""; return 0; }
 
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ -z "$line" ]] && continue
-    local u
-    u=$(printf '%s' "$line" | jq -r '.uuid // ""' 2>/dev/null || echo "")
-    [[ -n "$u" ]] && last_uuid="$u"
-  done < <(head -c "$end_offset" "$transcript")
-
-  echo "$last_uuid"
+  head -c "$end_offset" "$transcript" | jq -Rrn '
+    [inputs | fromjson? // empty | if type == "object" then (.uuid // "") | tostring else "" end | select(length > 0)]
+    | last // ""
+  ' 2>/dev/null || echo ""
 }
 
 # sum_transcript: stream JSONL from start_offset, optionally verify previous uuid.
@@ -115,42 +112,56 @@ sum_transcript() {
     return 0
   fi
 
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ -z "$line" ]] && continue
+  # Single jq pass over the appended window: sums usage tokens, tracks the
+  # last uuid, and reports the first invalid usage field in line order.
+  # Replaces the old per-line loop that spawned ~5 jq processes per JSONL
+  # line — the dominant cost of every PostToolBatch/Stop hook invocation.
+  local summary
+  summary=$(tail -c +$((start_offset + 1)) "$transcript" | jq -Rrn --argjson max "$MAX_USAGE_FIELD" '
+    def usage_field($u; $f):
+      ($u[$f] // 0) as $v
+      | if ($v | type) == "number" and $v >= 0 and $v <= $max and (($v | floor) == $v)
+        then {ok: true, value: $v}
+        else {ok: false, value: 0}
+        end;
+    reduce (inputs | fromjson? // empty) as $rec (
+      {delta: 0, uuid: "", cap: ""};
+      if .cap != "" then .
+      else
+        (if ($rec | type) == "object" and $rec.type == "assistant"
+            and ($rec | has("message")) and (($rec.message | type) == "object")
+            and ($rec.message | has("usage")) then
+          usage_field($rec.message.usage; "input_tokens") as $i
+          | usage_field($rec.message.usage; "cache_creation_input_tokens") as $c
+          | usage_field($rec.message.usage; "output_tokens") as $o
+          | if ($i.ok | not) then .cap = "input_tokens"
+            elif ($c.ok | not) then .cap = "cache_creation_input_tokens"
+            elif ($o.ok | not) then .cap = "output_tokens"
+            else .delta += ($i.value + $c.value + $o.value)
+            end
+        else . end)
+        | if .cap != "" then .
+          elif ($rec | type) == "object" and ((($rec.uuid // "") | tostring) != "") then .uuid = ($rec.uuid | tostring)
+          else . end
+      end
+    )
+    | "\(.delta)|\(.uuid)|\(.cap)"
+  ' 2>/dev/null)
 
-    # Usage validation and accounting for assistant messages.
-    local type
-    type=$(printf '%s' "$line" | jq -r '.type // ""')
-    if [[ "$type" == "assistant" ]]; then
-      local has_usage
-      has_usage=$(printf '%s' "$line" | jq 'has("message") and (.message | has("usage"))' 2>/dev/null)
-      if [[ "$has_usage" == "true" ]]; then
-        local input cache_create output
-        input=$(read_usage_field "$line" "input_tokens")
-        cache_create=$(read_usage_field "$line" "cache_creation_input_tokens")
-        output=$(read_usage_field "$line" "output_tokens")
+  IFS='|' read -r tokens_delta last_uuid cap_field <<< "$summary"
 
-        if [[ "$input" == "__invalid__" ]]; then
-          echo "0||$end_offset|0|input_tokens"
-          return 0
-        fi
-        if [[ "$cache_create" == "__invalid__" ]]; then
-          echo "0||$end_offset|0|cache_creation_input_tokens"
-          return 0
-        fi
-        if [[ "$output" == "__invalid__" ]]; then
-          echo "0||$end_offset|0|output_tokens"
-          return 0
-        fi
-        tokens_delta=$((tokens_delta + input + cache_create + output))
-      fi
-    fi
+  # jq failed outright (missing binary, hard parse crash): report a no-op at
+  # the existing cursor so nothing is skipped and a later pass can retry.
+  if [[ ! "$tokens_delta" =~ ^[0-9]+$ ]]; then
+    echo "0||$start_offset|0|"
+    return 0
+  fi
 
-    local u
-    u=$(printf '%s' "$line" | jq -r '.uuid // ""')
-    [[ -n "$u" ]] && last_uuid="$u"
-
-  done < <(tail -c +$((start_offset + 1)) "$transcript")
+  # Invalid usage field: match the legacy contract — zero delta, empty uuid.
+  if [[ -n "$cap_field" ]]; then
+    echo "0||$end_offset|0|$cap_field"
+    return 0
+  fi
 
   echo "$tokens_delta|$last_uuid|$end_offset|$cursor_reset|$cap_field"
 }

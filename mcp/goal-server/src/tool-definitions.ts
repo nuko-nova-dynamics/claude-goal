@@ -27,7 +27,7 @@ export function listGoalTools(envSessionId: string | null) {
     },
     {
       name: "update_goal",
-      description: "Update the existing goal. Use this tool only to mark the goal achieved or genuinely blocked. Set status to 'complete' only when the objective has actually been achieved and no required work remains. Set status to 'blocked' only after the same blocker has repeated across at least three consecutive continuation turns and no meaningful progress is possible without user input or an external-state change. Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work. The optional 'completed_by' field distinguishes worker self-audit completion from evaluator-confirmed completion (after the claude-goal:goal-evaluator subagent returns verdict 'complete', send 'evaluator'; worker-only fallback omits it or sends 'self_update'). Evaluator completion may close accounting_error or budget_limited race states; self_update cannot bypass them.",
+      description: "Update the existing goal. Use this tool only to mark the goal achieved or genuinely blocked. Set status to 'complete' only when the objective has actually been achieved and no required work remains. Set status to 'blocked' only after the same blocker has repeated across at least three consecutive continuation turns and no meaningful progress is possible without user input or an external-state change. Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work. The optional 'completed_by' field distinguishes worker self-audit completion from evaluator-confirmed completion: 'evaluator' requires that the claude-goal:goal-evaluator subagent already recorded a 'complete' verdict via record_verdict (the call fails otherwise); worker-only fallback omits it or sends 'self_update'. Evaluator completion may close accounting_error or budget_limited race states; self_update cannot bypass them.",
       inputSchema: {
         type: "object",
         required: envSessionId ? ["status"] : ["session_id", "status"],
@@ -38,6 +38,36 @@ export function listGoalTools(envSessionId: string | null) {
           status: { type: "string", enum: ["complete", "blocked"] },
           completed_by: { type: "string", enum: ["self_update", "evaluator"] },
           blocked_reason: { type: ["string", "null"], maxLength: 1000 },
+        },
+      },
+    },
+    {
+      name: "record_verdict",
+      description: "Record the goal-evaluator's completion verdict for the active goal. Reserved for the claude-goal:goal-evaluator subagent — the worker must never call this tool itself; fabricating a verdict defeats the independent-verification audit trail. Verdicts: 'complete' (every requirement verified against real state), 'incomplete' (specific items remain), 'unverifiable' (evaluator could not verify), 'impossible' (the objective is genuinely unachievable in this session — independently confirmed, not just claimed by the worker). A recent 'complete' verdict is required before update_goal with completed_by:'evaluator' succeeds.",
+      inputSchema: {
+        type: "object",
+        required: envSessionId ? ["verdict"] : ["session_id", "verdict"],
+        additionalProperties: false,
+        properties: {
+          session_id: { type: "string" },
+          goal_id: { type: ["string", "null"] },
+          verdict: { type: "string", enum: ["complete", "incomplete", "unverifiable", "impossible"] },
+          reason: { type: ["string", "null"], maxLength: 1000, description: "Short evidence summary (complete) or what remains / could not be verified." },
+          evidence: { type: ["array", "null"], items: { type: "string" }, maxItems: 20, description: "Specific verified facts: command exit codes, file contents, test output." },
+        },
+      },
+    },
+    {
+      name: "update_objective",
+      description: "Replace the objective of the current active or budget-limited goal while keeping its budget, token accounting, and history. Use only when the user explicitly changes or refines what the goal should accomplish mid-run; do not use it to narrow the objective so it is easier to complete, and do not use it to mark progress. The next continuation turn picks up the new objective automatically.",
+      inputSchema: {
+        type: "object",
+        required: envSessionId ? ["objective"] : ["session_id", "objective"],
+        additionalProperties: false,
+        properties: {
+          session_id: { type: "string" },
+          goal_id: { type: ["string", "null"] },
+          objective: { type: "string", minLength: 1, maxLength: 4000 },
         },
       },
     },

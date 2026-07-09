@@ -18,8 +18,14 @@ fi
 #   2. Explicit DB_PATH (test/local override when no marker exists)
 #   3. CLAUDE_PLUGIN_DATA env (fallback; can leak across plugin contexts)
 #   4. Hardcoded fallback (last resort; likely wrong, but better than crashing)
+# The marker target must still exist — a marker leaked by a dev/test run can
+# point at a deleted temp dir and must not shadow the live data dir.
+MARKER_DATA=""
 if [[ -n "$PLUGIN_ROOT" && -f "$PLUGIN_ROOT/.runtime-data-dir" ]]; then
-  PLUGIN_DATA=$(cat "$PLUGIN_ROOT/.runtime-data-dir")
+  MARKER_DATA=$(cat "$PLUGIN_ROOT/.runtime-data-dir" 2>/dev/null || echo "")
+fi
+if [[ -n "$MARKER_DATA" && -d "$MARKER_DATA" ]]; then
+  PLUGIN_DATA="$MARKER_DATA"
   DB_PATH="$PLUGIN_DATA/goals.db"
 elif [[ -z "${DB_PATH:-}" ]]; then
   if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
@@ -352,6 +358,15 @@ case "$SUBCMD" in
     else
       # delete
       DELETED=$(sqlite3 -bail "$DB_PATH" "SELECT COUNT(*) FROM goals WHERE updated_at_ms < $CUTOFF;" 2>/dev/null || echo "0")
+      # Remove the per-session fast-path markers before the rows, so a
+      # crash between the two steps leaves markers gone (hooks skip) rather
+      # than rows gone with stale markers (hooks do pointless DB work).
+      if [[ -d "${PLUGIN_DATA:-}/sessions" ]]; then
+        while IFS= read -r ORPHAN_SID; do
+          [[ -z "$ORPHAN_SID" ]] && continue
+          rm -f "$PLUGIN_DATA/sessions/$(printf '%s' "$ORPHAN_SID" | tr -c 'A-Za-z0-9_.:-' '_')" 2>/dev/null || true
+        done < <(sqlite3 -bail "$DB_PATH" "SELECT session_id FROM goals WHERE updated_at_ms < $CUTOFF;" 2>/dev/null)
+      fi
       sqlite3 -bail -cmd ".timeout 5000" "$DB_PATH" "
         BEGIN IMMEDIATE;
         DELETE FROM goal_events WHERE session_id IN (SELECT session_id FROM goals WHERE updated_at_ms < $CUTOFF);
@@ -410,12 +425,22 @@ case "$SUBCMD" in
     else
       add_check hooks_enabled pass ""
     fi
+    # Stop-hook block cap (informational). Claude Code ≥2.1.143 force-ends a
+    # turn after N consecutive work-less Stop-hook blocks (default 8). Normal
+    # continuations reset the counter by doing tool work, but a goal whose
+    # turns produce prose only can be cut short. 0 disables the cap.
+    CAP_VALUE="${CLAUDE_CODE_STOP_HOOK_BLOCK_CAP:-}"
+    if [[ -n "$CAP_VALUE" ]]; then
+      add_check stop_hook_block_cap pass "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=$CAP_VALUE"
+    else
+      add_check stop_hook_block_cap pass "unset — harness default 8; for long unattended runs consider raising it (or 0 to disable) via settings.json env"
+    fi
 
     OVERALL=$(echo "$CHECKS" | jq -r 'if (map(select(.status=="fail")) | length) > 0 then "fail" elif (map(select(.status=="warn")) | length) > 0 then "warn" else "pass" end')
 
     PLATFORM="${OSTYPE:-$(uname)}"
     if [[ "$FORMAT" = "json" ]]; then
-      jq -n --arg v "0.2.9" --arg p "$PLATFORM" --argjson c "$CHECKS" --arg o "$OVERALL" \
+      jq -n --arg v "0.3.0" --arg p "$PLATFORM" --argjson c "$CHECKS" --arg o "$OVERALL" \
         '{version:$v, platform:$p, checks:$c, overall:$o}'
     else
       echo "claude-goal doctor: $OVERALL"

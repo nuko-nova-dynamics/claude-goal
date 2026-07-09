@@ -40,6 +40,16 @@ This is intentionally explicit. Ordinary prompts like "fix this bug" do not beco
 
 Show the active goal's status, budget profile/source, token totals, continuations remaining, wall-clock used, and any warnings (e.g. `accounting_uncertain` after `/compact`).
 
+### `/goal-update`
+
+```
+/goal-update "<new objective>"
+```
+
+Replace the objective of the current `active` or `budget_limited` goal mid-run. The budget, token accounting, continuation counters, and event history all carry over; the next continuation turn picks up the new objective automatically. Records a `goal_objective_updated` event with the previous objective.
+
+Also works with explicit natural language ("update the goal to also cover X"). Paused or blocked goals must be resumed first.
+
 ### `/goal-pause` · `/goal-resume`
 
 ```

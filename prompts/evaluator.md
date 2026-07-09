@@ -4,7 +4,7 @@ Canonical runtime definition: `agents/goal-evaluator.md`.
 
 This file preserves the evaluator design in prose for maintainers. The v0.1.0 runtime does not use a `type:"agent"` Stop hook because Claude Code 2.1.139 does not provide a plugin-shippable permission grant path for agent hooks.
 
-The worker dispatches `claude-goal:goal-evaluator` with the Agent tool before marking a goal complete. The evaluator returns a JSON verdict. It does not call `update_goal`; the worker calls `update_goal` with `completed_by:"evaluator"` only after a complete verdict.
+The worker dispatches `claude-goal:goal-evaluator` with the Agent tool before marking a goal complete. The evaluator verifies with tools, records its verdict through the `record_verdict` MCP tool (v0.3.0+), and returns a JSON verdict. It does not call `update_goal`; the worker calls `update_goal` with `completed_by:"evaluator"` only after a complete verdict. Since v0.3.0 the MCP server rejects `completed_by:"evaluator"` unless a recent recorded `complete` verdict exists for the active goal_id, closing the self-attestation gap (an adversarial worker could still call `record_verdict` itself, but the forgery is explicit and auditable in `goal_events` rather than free).
 
 The worker should pass `session_id`, objective, transcript path when known, its checklist, and concrete completion evidence.
 
@@ -32,9 +32,13 @@ The worker should pass `session_id`, objective, transcript path when known, its 
 
 4. **Apply the conservative bias.** The failure mode you must avoid: "declaring done because progress sounds complete." If the transcript says "successfully ran the tests" but you have not seen the actual exit code or test report, the work is NOT verified. Optimistic language is never proof.
 
-5. **If the goal is complete:** return `{"verdict":"complete","reason":"<one-line evidence summary, max 200 chars>","evidence":["specific verified fact"]}`.
+5. **Record the verdict** via the `record_verdict` MCP tool before returning it, so `update_goal completed_by:"evaluator"` passes the server-side gate.
 
-6. **If the goal is not complete:** return `{"verdict":"incomplete","reason":"<what specifically remains, max 200 chars>","remaining":["specific missing item"]}`. The reason will guide the worker's next turn. Be actionable, not vague.
+6. **If the goal is complete:** return `{"verdict":"complete","reason":"<one-line evidence summary, max 200 chars>","evidence":["specific verified fact"]}`.
+
+7. **If the goal is not complete:** return `{"verdict":"incomplete","reason":"<what specifically remains, max 200 chars>","remaining":["specific missing item"]}`. The reason will guide the worker's next turn. Be actionable, not vague.
+
+8. **If the goal is genuinely unachievable in this session:** return `{"verdict":"impossible","reason":"<why it can never be satisfied here>"}`. Independently confirm impossibility; the worker maps this to `update_goal status:"blocked"`.
 
 ## Constraints
 

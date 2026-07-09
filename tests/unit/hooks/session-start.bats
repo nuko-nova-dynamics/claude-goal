@@ -38,6 +38,19 @@ teardown() {
   [ "$EVENT_COUNT" = "0" ]
 }
 
+@test "SessionStart heals the per-session fast-path marker when a goal row exists" {
+  [ ! -f "$TMPDIR_TEST/sessions/s1" ]
+  echo '{"session_id":"s1","source":"resume"}' \
+    | "$REPO_ROOT/scripts/session-start.sh"
+  [ -f "$TMPDIR_TEST/sessions/s1" ]
+}
+
+@test "SessionStart writes no marker for sessions without a goal row" {
+  echo '{"session_id":"no-goal-session","source":"startup"}' \
+    | "$REPO_ROOT/scripts/session-start.sh"
+  [ ! -f "$TMPDIR_TEST/sessions/no-goal-session" ]
+}
+
 # ---------------------------------------------------------------------------
 # 2. source=resume: logs session_resumed event
 # ---------------------------------------------------------------------------

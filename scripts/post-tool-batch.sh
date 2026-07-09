@@ -7,9 +7,15 @@ source "$SCRIPT_DIR/lib/schema.sh"
 source "$SCRIPT_DIR/lib/accounting-core.sh"
 
 # Resolve DB path the same way goal-cli.sh does:
-# marker file > CLAUDE_PLUGIN_DATA > hardcoded fallback
+# marker file > CLAUDE_PLUGIN_DATA > hardcoded fallback.
+# The marker target must still exist — a marker leaked by a dev/test run can
+# point at a deleted temp dir and must not shadow the live data dir.
+MARKER_DATA=""
 if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir" ]]; then
-  PLUGIN_DATA=$(cat "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir")
+  MARKER_DATA=$(cat "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir" 2>/dev/null || echo "")
+fi
+if [[ -n "$MARKER_DATA" && -d "$MARKER_DATA" ]]; then
+  PLUGIN_DATA="$MARKER_DATA"
 elif [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
   PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
 else
@@ -28,6 +34,16 @@ AGENT_TRANSCRIPT=$(echo "$INPUT" | jq -r '.agent_transcript_path // ""' 2>/dev/n
 if [[ -z "$SESSION_ID" || -z "$TRANSCRIPT" ]]; then
   log_error "post-tool-batch: missing session_id or transcript_path"
   exit 0
+fi
+
+# Fast-path gate: create_goal writes a per-session marker file (and
+# session-start.sh heals it on resume). When the sessions/ dir exists but
+# this session has no marker, no goal was ever created here — skip all
+# sqlite/jq work. A missing sessions/ dir means a pre-marker install:
+# fall through to the legacy DB checks (fail open).
+if [[ -d "$PLUGIN_DATA/sessions" ]]; then
+  SESSION_MARKER="$PLUGIN_DATA/sessions/$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9_.:-' '_')"
+  [[ ! -f "$SESSION_MARKER" ]] && exit 0
 fi
 
 if ! ensure_schema_current; then

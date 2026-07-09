@@ -44,13 +44,21 @@ The subagent (defined in `agents/goal-evaluator.md`) runs in a fresh context wit
 1. Reads the active goal's objective from `goals.db`
 2. Inspects recent transcript messages for what the worker claims to have done
 3. **Verifies with tools** — runs the test, reads the file, checks the exit code, queries the API
-4. Returns `{"verdict": "complete" | "incomplete" | "unverifiable", "reason": "<concrete evidence or what's missing>"}`
+4. **Records the verdict** via the `record_verdict` MCP tool, writing it into the goal's `goal_events` audit log
+5. Returns `{"verdict": "complete" | "incomplete" | "unverifiable" | "impossible", "reason": "<concrete evidence or what's missing>"}`
 
 The verdict drives the worker's next action:
 
 - `complete` → call `update_goal status:complete completed_by:"evaluator"`
 - `incomplete` → continue working on the gap the evaluator identified
 - `unverifiable` → the evaluator can't tell; the worker falls back to self-audit
+- `impossible` → the objective is genuinely unachievable in this session; the worker calls `update_goal status:"blocked"` with the evaluator's reason
+
+## The verdict is enforced, not trusted
+
+Since v0.3.0, `update_goal completed_by:"evaluator"` is rejected by the MCP server unless a `complete` verdict was recorded for the active goal within the last 30 minutes. Before this gate, the worker could *claim* evaluator completion without ever dispatching the subagent — and that claim carried privileges, because evaluator completion is allowed to close `budget_limited` and `accounting_error` states that self-audit cannot.
+
+The gate is an audit-trail defense, not a cryptographic one: the worker technically has access to `record_verdict` too, and a determined worker could forge a verdict. But the forgery would be an explicit, visible tool call in the transcript and a permanent `evaluator_verdict` event in `goal_events` — auditable after the fact — rather than a free assertion.
 
 ## Conservative by design
 

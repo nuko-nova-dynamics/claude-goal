@@ -6,6 +6,8 @@ import { handleCreateGoal } from "../src/tools/create-goal.js";
 import { handleUpdateGoal } from "../src/tools/update-goal.js";
 import { handleResumeGoal } from "../src/tools/resume-goal.js";
 import { handleAbandonGoal } from "../src/tools/abandon-goal.js";
+import { handleRecordVerdict } from "../src/tools/record-verdict.js";
+import { handleUpdateObjective } from "../src/tools/update-objective.js";
 import { listGoalTools } from "../src/tool-definitions.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -196,6 +198,7 @@ describe("update_goal tool", () => {
   it("records goal_completed_by_evaluator event when completed_by='evaluator'", () => {
     const repo = freshRepo();
     handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    handleRecordVerdict(repo, { session_id: "s1", verdict: "complete", reason: "verified" });
     handleUpdateGoal(repo, { session_id: "s1", status: "complete", completed_by: "evaluator" });
     const events = repo["db"]
       .prepare("SELECT event_type FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1")
@@ -208,6 +211,7 @@ describe("update_goal tool", () => {
     handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
     const goal = repo.getBySession("s1")!;
     repo.pause("s1", goal.goal_id, "accounting_error");
+    handleRecordVerdict(repo, { session_id: "s1", verdict: "complete", reason: "verified" });
 
     const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete", completed_by: "evaluator" });
 
@@ -240,6 +244,7 @@ describe("update_goal tool", () => {
     repo.pause("s1", repo.getBySession("s1")!.goal_id, "degraded");
     repo.resume("s1", repo.getBySession("s1")!.goal_id);
     repo.testHelper_setStatus("s1", "budget_limited");
+    handleRecordVerdict(repo, { session_id: "s1", verdict: "complete", reason: "verified" });
 
     const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete", completed_by: "evaluator" });
 
@@ -384,5 +389,162 @@ describe("abandon_goal tool", () => {
     handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
     handleUpdateGoal(repo, { session_id: "s1", status: "complete" });
     expect(handleAbandonGoal(repo, { session_id: "s1" }).error).toMatch(/no goal to abandon/);
+  });
+});
+
+describe("record_verdict tool", () => {
+  it("records an evaluator_verdict event with reason and evidence", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+
+    const out = handleRecordVerdict(repo, {
+      session_id: "s1",
+      verdict: "complete",
+      reason: "tests pass",
+      evidence: ["npm test exit 0"],
+    });
+
+    expect(out.ok).toBe(true);
+    const event = repo["db"]
+      .prepare("SELECT event_type, payload_json FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1")
+      .get() as { event_type: string; payload_json: string };
+    expect(event.event_type).toBe("evaluator_verdict");
+    expect(JSON.parse(event.payload_json)).toMatchObject({
+      verdict: "complete",
+      reason: "tests pass",
+      evidence: ["npm test exit 0"],
+    });
+  });
+
+  it("rejects unknown verdicts and terminal goal states", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    expect(handleRecordVerdict(repo, { session_id: "s1", verdict: "done" as never }).error).toMatch(/verdict must be one of/);
+
+    handleUpdateGoal(repo, { session_id: "s1", status: "complete" });
+    expect(handleRecordVerdict(repo, { session_id: "s1", verdict: "complete" }).error).toMatch(/status 'complete'/);
+  });
+
+  it("respects goal_id mismatch protection", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    expect(handleRecordVerdict(repo, { session_id: "s1", goal_id: "wrong", verdict: "complete" }).error).toMatch(/goal_id mismatch/);
+  });
+});
+
+describe("update_goal evaluator verdict gating", () => {
+  it("rejects completed_by='evaluator' without a recorded verdict", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+
+    const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete", completed_by: "evaluator" });
+
+    expect(out.error).toMatch(/record_verdict/);
+    expect(repo.getBySession("s1")!.status).toBe("active");
+  });
+
+  it("rejects completed_by='evaluator' when the only verdict is not 'complete'", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    handleRecordVerdict(repo, { session_id: "s1", verdict: "incomplete", reason: "tests failing" });
+
+    const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete", completed_by: "evaluator" });
+
+    expect(out.error).toMatch(/record_verdict/);
+    expect(repo.getBySession("s1")!.status).toBe("active");
+  });
+
+  it("rejects completed_by='evaluator' when the verdict is stale", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    handleRecordVerdict(repo, { session_id: "s1", verdict: "complete", reason: "verified" });
+    repo["db"]
+      .prepare("UPDATE goal_events SET created_at_ms = created_at_ms - 31*60*1000 WHERE event_type='evaluator_verdict'")
+      .run();
+
+    const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete", completed_by: "evaluator" });
+
+    expect(out.error).toMatch(/record_verdict/);
+    expect(repo.getBySession("s1")!.status).toBe("active");
+  });
+
+  it("ignores verdicts recorded for a previous replaced goal", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "first", token_budget: null });
+    handleRecordVerdict(repo, { session_id: "s1", verdict: "complete", reason: "verified" });
+    handleAbandonGoal(repo, { session_id: "s1" });
+    handleCreateGoal(repo, { session_id: "s1", objective: "second", token_budget: null });
+
+    const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete", completed_by: "evaluator" });
+
+    expect(out.error).toMatch(/record_verdict/);
+    expect(repo.getBySession("s1")!.status).toBe("active");
+  });
+
+  it("still allows self_update completion from active without any verdict", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+
+    const out = handleUpdateGoal(repo, { session_id: "s1", status: "complete" });
+
+    expect(out.goal!.status).toBe("complete");
+  });
+});
+
+describe("update_objective tool", () => {
+  it("replaces the objective and records the previous one", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "first objective", token_budget: 1000 });
+
+    const out = handleUpdateObjective(repo, { session_id: "s1", objective: "refined objective" });
+
+    expect(out.goal!.objective).toBe("refined objective");
+    expect(out.goal!.token_budget).toBe(1000);
+    expect(out.goal!.status).toBe("active");
+    const event = repo["db"]
+      .prepare("SELECT event_type, payload_json FROM goal_events WHERE session_id='s1' ORDER BY id DESC LIMIT 1")
+      .get() as { event_type: string; payload_json: string };
+    expect(event.event_type).toBe("goal_objective_updated");
+    expect(JSON.parse(event.payload_json)).toMatchObject({ previous_objective: "first objective" });
+  });
+
+  it("preserves token accounting across the update", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "first", token_budget: null });
+    repo["db"].prepare("UPDATE goals SET tokens_used = 12345 WHERE session_id='s1'").run();
+
+    const out = handleUpdateObjective(repo, { session_id: "s1", objective: "second" });
+
+    expect(out.goal!.tokens_used).toBe(12345);
+  });
+
+  it("rejects updates on non-active, non-budget-limited goals", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+    handleUpdateGoal(repo, { session_id: "s1", status: "blocked", blocked_reason: "waiting" });
+
+    const out = handleUpdateObjective(repo, { session_id: "s1", objective: "new" });
+
+    expect(out.error).toMatch(/status 'blocked'/);
+    expect(repo.getBySession("s1")!.objective).toBe("x");
+  });
+
+  it("allows updates while budget_limited", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: 1000 });
+    repo.testHelper_setStatus("s1", "budget_limited");
+
+    const out = handleUpdateObjective(repo, { session_id: "s1", objective: "refined" });
+
+    expect(out.goal!.objective).toBe("refined");
+    expect(out.goal!.status).toBe("budget_limited");
+  });
+
+  it("rejects empty and overlong objectives", () => {
+    const repo = freshRepo();
+    handleCreateGoal(repo, { session_id: "s1", objective: "x", token_budget: null });
+
+    expect(handleUpdateObjective(repo, { session_id: "s1", objective: "  " }).error).toMatch(/objective is required/);
+    expect(handleUpdateObjective(repo, { session_id: "s1", objective: "y".repeat(4001) }).error).toMatch(/4000/);
   });
 });

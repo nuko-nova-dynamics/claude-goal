@@ -13,7 +13,7 @@
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/github/license/nuko-nova-dynamics/claude-goal?style=flat&color=4a4a4a"></a>
   <a href="https://github.com/nuko-nova-dynamics/claude-goal/actions/workflows/test.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/nuko-nova-dynamics/claude-goal/test.yml?branch=main&style=flat&label=tests"></a>
   <img alt="claude code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-D97757?style=flat">
-  <img alt="tests" src="https://img.shields.io/badge/tests-254_green-4a4a4a?style=flat">
+  <img alt="tests" src="https://img.shields.io/badge/tests-274_green-4a4a4a?style=flat">
 </p>
 
 <p align="center">
@@ -44,13 +44,15 @@ It's a production-grade companion to Claude Code 2.1.139+'s built-in `/goal`. Th
 | | Built-in `/goal` (2.1.139+) | `claude-goal` |
 |---|---|---|
 | Autonomous continuation | ✓ | ✓ |
-| Budget control | phrase in condition | deterministic profiles (`quick`, `standard`, `deep`, `overnight`, `auto`) or raw token caps |
-| Turn / time caps | phrase in condition | practical-unlimited by default; profile-sized hard caps, `/goal-extend` to raise |
+| Budget control | phrase in the condition ("or stop after 20 turns"), judged by the evaluator | deterministic profiles (`quick`, `standard`, `deep`, `overnight`, `auto`) or raw token caps, enforced by hooks |
+| Turn / time caps | prompt-level only | practical-unlimited by default; profile-sized hard caps, `/goal-extend` to raise |
 | Pause · resume · abandon | `/goal clear` only | `/goal-pause`, `/goal-resume`, `/goal-abandon` |
-| Blocked-state recovery | prompt-only | `status=blocked`, visible status, `/goal-resume`, `resume_goal` MCP |
+| Mid-run objective update | new condition replaces the old goal | `/goal-update` keeps budget, accounting, and history |
+| Blocked-state recovery | evaluator can fail the goal as impossible | `status=blocked`, visible status, `/goal-resume`, `resume_goal` MCP; evaluator `impossible` verdict maps to blocked |
 | `/compact` recovery | n/a | `accounting_uncertain` flag + `/goal-reconcile` |
-| Restart persistence | counters reset | SQLite preserves everything |
-| Completion judgment | fresh Haiku per turn (transcript-only) | dual path — worker self-audit **and** a plugin subagent that verifies with **tools** |
+| Restart persistence | condition restored on `--resume`; turn/token counters reset | SQLite preserves everything |
+| Background-task awareness | defers evaluation while background shells/subagents run | continuation fires regardless |
+| Completion judgment | small fast model (default Haiku), transcript-only — it cannot run tools | a plugin subagent that verifies with **tools**; its verdict is recorded and enforced by the MCP server before `completed_by:"evaluator"` is accepted |
 
 Run them side-by-side. They don't collide.
 
@@ -114,7 +116,7 @@ sequenceDiagram
 
 **Token accounting.** `scripts/post-tool-batch.sh` reads the session transcript JSONL after every tool batch, finds assistant messages past the last cursor, and sums `input_tokens + cache_creation_input_tokens + output_tokens`. Cache-read tokens are excluded. Parent-worker counts go to `tokens_used`; subagent counts go to `subagent_tokens` through per-agent cursors stored in `subagent_token_cursors`.
 
-**Completion — dual path.** The worker can self-audit and call `update_goal status:complete` (`completed_by: "self_update"`). The continuation prompt also instructs the worker to dispatch the `claude-goal:goal-evaluator` subagent before declaring done. The evaluator runs in a fresh context with `Bash + Read + jq + sqlite3` — it reads the objective from the DB, queries real state with tools, and returns `{"verdict":"complete"|"incomplete"|"unverifiable"}`. On `complete`, the worker calls `update_goal completed_by:"evaluator"`, which logs a distinct `goal_completed_by_evaluator` event. Evaluator completion can also close a goal paused by `accounting_error` after `/compact` or a `budget_limited` goal when the token cap races with a verified-complete verdict. Self-update completion cannot bypass those guarded states. The two paths coexist; evaluator is preferred, self-audit is the fallback.
+**Completion — dual path.** The worker can self-audit and call `update_goal status:complete` (`completed_by: "self_update"`). The continuation prompt also instructs the worker to dispatch the `claude-goal:goal-evaluator` subagent before declaring done. The evaluator runs in a fresh context with `Bash + Read + jq + sqlite3` — it reads the objective from the DB, queries real state with tools, records its verdict through the `record_verdict` MCP tool, and returns `{"verdict":"complete"|"incomplete"|"unverifiable"|"impossible"}`. On `complete`, the worker calls `update_goal completed_by:"evaluator"` — which the MCP server accepts only when a recent recorded `complete` verdict exists for the active goal, so evaluator completion cannot be claimed without an evaluator run. On `impossible`, the worker marks the goal `blocked` with the evaluator's reason. Evaluator completion can also close a goal paused by `accounting_error` after `/compact` or a `budget_limited` goal when the token cap races with a verified-complete verdict. Self-update completion cannot bypass those guarded states. The two paths coexist; evaluator is preferred, self-audit is the fallback.
 
 **Blocked state.** If the same blocker repeats across at least three consecutive continuation turns and no meaningful progress is possible without user input or an external-state change, the worker can call `update_goal status:blocked blocked_reason:"..."`. Blocked goals stop auto-continuing, stay visible in status/history, and can be restarted with `/goal-resume` or the `resume_goal` MCP tool.
 
@@ -134,6 +136,7 @@ sequenceDiagram
 |---|---|
 | `/goal-start "objective" [--budget quick\|standard\|deep\|overnight\|auto\|N]` or explicit prose like "set up a goal for this" | Start a new goal. Omit `--budget` or omit any prose budget request for unbounded. Replaces any prior completed/abandoned goal for this session. |
 | `/goal-status` | Current goal, status, selected budget profile/source, worker + subagent tokens, continuations remaining, warnings. |
+| `/goal-update "new objective"` | Replace the objective of the active goal mid-run. Budget, token accounting, and history carry over. |
 | `/goal-pause` · `/goal-resume` | User pause/resume, or resume a blocked goal. |
 | `/goal-abandon` (`/goal-stop`) | Abandon permanently. Stops the auto-continuation loop. |
 | `/goal-extend --add-continuations N` | Raise turn cap on a `continuation_cap`-paused goal and resume. |
@@ -201,6 +204,7 @@ Renders one of:
 ## Known limitations
 
 - **macOS · Linux · WSL only.** Native Windows triggers a fail-fast guard in `stop.sh`. WSL is best-effort and untested.
+- **Claude Code's Stop-hook block cap.** Since CC 2.1.143 the harness force-ends a turn after 8 consecutive *work-less* Stop-hook blocks (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`, default 8; `0` disables). Normal continuations reset the counter by doing tool work, so long runs are unaffected — but a goal whose turns produce prose only (e.g. `update_goal` keeps failing while the model keeps asserting done-ness) is cut short with the goal still `active`; any new user message resumes the loop. `/goal-doctor` reports the current cap. For long unattended runs, consider raising it in `settings.json` `env`.
 - **Auto-mode classifier may block `update_goal`.** Use concrete, achievable objectives ("add a `--verbose` flag to the CLI" — not "do the task").
 - **`/clear` orphans the active goal.** Use `/goal-abandon` before clearing, or `/goal-cleanup` to reap orphan rows later.
 - **Final-turn accounting is bounded.** F5 catches late completion-turn transcript flushes with five 100ms retries. If Claude Code flushes completion usage after that window, a tiny residual undercount is still possible — the retry is intentionally bounded so Stop hooks do not hang.

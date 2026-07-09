@@ -7,8 +7,12 @@ set -uo pipefail
 # DB path resolution: marker file > env > fallback. Match Phase 4.6 inverted resolver.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+MARKER_DATA=""
 if [[ -f "$PLUGIN_ROOT/.runtime-data-dir" ]]; then
-  PLUGIN_DATA=$(cat "$PLUGIN_ROOT/.runtime-data-dir")
+  MARKER_DATA=$(cat "$PLUGIN_ROOT/.runtime-data-dir" 2>/dev/null || echo "")
+fi
+if [[ -n "$MARKER_DATA" && -d "$MARKER_DATA" ]]; then
+  PLUGIN_DATA="$MARKER_DATA"
 elif [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
   PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
 else

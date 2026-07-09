@@ -13,6 +13,13 @@ import {
 
 export type GoalStatus = "active" | "paused" | "blocked" | "budget_limited" | "complete" | "abandoned";
 export type PausedReason = "user" | "continuation_cap" | "wall_clock_cap" | "cleared" | "degraded" | "accounting_error";
+export type EvaluatorVerdict = "complete" | "incomplete" | "unverifiable" | "impossible";
+
+// How long a recorded evaluator verdict stays valid for update_goal
+// completed_by:"evaluator". Generous because verification (running test
+// suites) can be slow, but bounded so a stale verdict from an earlier
+// completion attempt cannot authorize a later, unrelated one.
+export const EVALUATOR_VERDICT_WINDOW_MS = 30 * 60 * 1000;
 
 export interface Goal {
   session_id: string;
@@ -134,11 +141,50 @@ export class GoalsRepo {
     return txn();
   }
 
+  recordVerdict(
+    session_id: string,
+    goal_id: string | undefined,
+    verdict: EvaluatorVerdict,
+    reason: string | null = null,
+    evidence: string[] | null = null
+  ): void {
+    const txn = this.db.transaction(() => {
+      const g = this.getBySession(session_id);
+      if (!g) throw new Error("no goal exists");
+      if (goal_id && g.goal_id !== goal_id) throw new Error("goal_id mismatch");
+      if (g.status === "complete" || g.status === "abandoned") {
+        throw new Error(`cannot record a verdict for a goal in status '${g.status}'`);
+      }
+      this.recordEvent(session_id, g.goal_id, "evaluator_verdict", g.status, g.status, {
+        verdict,
+        reason: reason?.trim() || null,
+        evidence: evidence ?? null,
+      });
+    });
+    txn();
+  }
+
+  hasRecentEvaluatorVerdict(session_id: string, goal_id: string, windowMs = EVALUATOR_VERDICT_WINDOW_MS): boolean {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS n FROM goal_events
+      WHERE session_id = ? AND goal_id = ?
+        AND event_type = 'evaluator_verdict'
+        AND json_extract(payload_json, '$.verdict') = 'complete'
+        AND created_at_ms >= ?
+    `).get(session_id, goal_id, Date.now() - windowMs) as { n: number };
+    return row.n > 0;
+  }
+
   markComplete(session_id: string, goal_id?: string, completedBy: "self_update" | "evaluator" = "self_update"): void {
     const txn = this.db.transaction(() => {
       const g = this.getBySession(session_id);
       if (!g) throw new Error("no goal exists");
       if (goal_id && g.goal_id !== goal_id) throw new Error("goal_id mismatch");
+      if (completedBy === "evaluator" && !this.hasRecentEvaluatorVerdict(session_id, g.goal_id)) {
+        throw new Error(
+          "completed_by:'evaluator' requires a recent recorded evaluator verdict. Dispatch the claude-goal:goal-evaluator subagent; it must call the record_verdict tool with verdict 'complete' before you call update_goal. If the evaluator is unavailable, use completed_by:'self_update' instead (not allowed from budget_limited or accounting_error states)."
+        );
+      }
       const evaluatorCanCloseAccountingPause =
         g.status === "paused" && g.paused_reason === "accounting_error" && completedBy === "evaluator";
       const evaluatorCanCloseBudgetLimited =
@@ -199,6 +245,32 @@ export class GoalsRepo {
 
       this.recordEvent(session_id, g.goal_id, "goal_blocked", g.status, "blocked",
         { reason: reason?.trim() || null });
+    });
+    txn();
+  }
+
+  updateObjective(session_id: string, goal_id: string | undefined, objective: string): void {
+    const txn = this.db.transaction(() => {
+      const g = this.getBySession(session_id);
+      if (!g) throw new Error("no goal exists");
+      if (goal_id && g.goal_id !== goal_id) throw new Error("goal_id mismatch");
+      if (g.status !== "active" && g.status !== "budget_limited") {
+        throw new Error(`cannot update the objective of a goal in status '${g.status}'; resume it first`);
+      }
+      if (typeof objective !== "string" || objective.trim().length < 1 || objective.length > 4000) {
+        throw new Error("objective must be 1-4000 characters");
+      }
+      const now = Date.now();
+      this.db.prepare(`
+        UPDATE goals SET
+          objective = ?,
+          version = version + 1,
+          updated_at_ms = ?
+        WHERE session_id = ? AND goal_id = ?
+      `).run(objective, now, session_id, g.goal_id);
+
+      this.recordEvent(session_id, g.goal_id, "goal_objective_updated", g.status, g.status,
+        { previous_objective: g.objective });
     });
     txn();
   }

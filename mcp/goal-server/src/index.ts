@@ -8,8 +8,10 @@ import { handleCreateGoal } from "./tools/create-goal.js";
 import { handleUpdateGoal } from "./tools/update-goal.js";
 import { handleResumeGoal } from "./tools/resume-goal.js";
 import { handleAbandonGoal } from "./tools/abandon-goal.js";
+import { handleRecordVerdict } from "./tools/record-verdict.js";
+import { handleUpdateObjective } from "./tools/update-objective.js";
 import { listGoalTools } from "./tool-definitions.js";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const dataDir = process.env.CLAUDE_PLUGIN_DATA ?? join(process.env.HOME ?? "/tmp", ".claude/plugins/data/claude-goal");
@@ -17,6 +19,20 @@ mkdirSync(dataDir, { recursive: true });
 const db = openDb(join(dataDir, "goals.db"));
 runMigrations(db);
 const repo = new GoalsRepo(db);
+
+// Session marker: lets the PostToolBatch hook skip sqlite/jq entirely for
+// sessions that never created a goal. Best-effort — a write failure only
+// costs the fast-path (hooks fall back to legacy behavior when the sessions/
+// dir is absent, and session-start.sh re-creates markers on resume).
+function writeSessionMarker(session_id: string): void {
+  try {
+    const safe = session_id.replace(/[^A-Za-z0-9_.:-]/g, "_");
+    mkdirSync(join(dataDir, "sessions"), { recursive: true });
+    writeFileSync(join(dataDir, "sessions", safe), "");
+  } catch {
+    // fail open
+  }
+}
 
 // Branch A defaulting: if env var inheritance works, tools default session_id from env
 const envSessionId = process.env.CLAUDE_SESSION_ID ?? process.env.CLAUDE_CODE_SESSION_ID ?? null;
@@ -28,7 +44,7 @@ function ensureSessionId(args: Record<string, unknown>): string {
 }
 
 const server = new Server(
-  { name: "claude-goal", version: "0.2.9" },
+  { name: "claude-goal", version: "0.3.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -45,9 +61,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     case "get_goal":
       result = handleGetGoal(repo, args as { session_id: string });
       break;
-    case "create_goal":
-      result = handleCreateGoal(repo, args as { session_id: string; objective: string; token_budget?: number | null; budget_profile?: "quick" | "standard" | "deep" | "overnight" | "auto" | null });
+    case "create_goal": {
+      const out = handleCreateGoal(repo, args as { session_id: string; objective: string; token_budget?: number | null; budget_profile?: "quick" | "standard" | "deep" | "overnight" | "auto" | null });
+      if (out.goal) writeSessionMarker(session_id);
+      result = out;
       break;
+    }
     case "update_goal":
       result = handleUpdateGoal(repo, args as { session_id: string; goal_id?: string; status: "complete" | "blocked"; completed_by?: "self_update" | "evaluator"; blocked_reason?: string | null });
       break;
@@ -57,6 +76,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     case "abandon_goal":
       result = handleAbandonGoal(repo, args as { session_id: string; goal_id?: string | null });
       break;
+    case "record_verdict":
+      result = handleRecordVerdict(repo, args as { session_id: string; goal_id?: string | null; verdict: "complete" | "incomplete" | "unverifiable" | "impossible"; reason?: string | null; evidence?: string[] | null });
+      break;
+    case "update_objective": {
+      const out = handleUpdateObjective(repo, args as { session_id: string; goal_id?: string | null; objective: string });
+      result = out;
+      break;
+    }
     default:
       throw new Error(`unknown tool: ${req.params.name}`);
   }

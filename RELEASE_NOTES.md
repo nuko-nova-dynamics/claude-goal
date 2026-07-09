@@ -1,3 +1,39 @@
+# claude-goal v0.3.0
+
+**Evaluator verdicts are recorded and enforced; prompts re-synced with upstream Codex; hook hot path rewritten.**
+
+This release closes the evaluator self-attestation gap: `update_goal completed_by:"evaluator"` previously trusted the worker's word that the goal-evaluator subagent ran and approved. It also merges the fidelity/anti-scope-shrink guidance upstream Codex added to its goal templates after our original port, adds mid-run objective updates, and removes the dominant per-line jq cost from the accounting hooks.
+
+## Added
+
+- `record_verdict` MCP tool: the goal-evaluator subagent records its verdict (`complete`, `incomplete`, `unverifiable`, `impossible`) with reason and evidence into `goal_events` before returning. `update_goal completed_by:"evaluator"` is now rejected unless a `complete` verdict was recorded for the active goal within the last 30 minutes — including the privileged paths that close `budget_limited` and `accounting_error` states. (A determined worker can still forge a `record_verdict` call, but the forgery is explicit and auditable rather than free.)
+- `impossible` evaluator verdict: when the objective is genuinely unachievable in this session (independently confirmed), the worker maps it to `update_goal status:"blocked"` — mirroring native `/goal`'s impossible outcome.
+- `update_objective` MCP tool + `/goal-update` skill: replace the objective of an active or budget-limited goal mid-run while keeping its budget, token accounting, and history. Records a `goal_objective_updated` event with the previous objective.
+- `/goal-doctor` now reports `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` (Claude Code ≥2.1.143 force-ends a turn after 8 consecutive work-less Stop-hook blocks; tool work resets the counter, `0` disables).
+
+## Fixed
+
+- Stale `.runtime-data-dir` markers are now ignored when their target directory no longer exists. A marker leaked by a dev/test run (pointing at a deleted temp dir) could previously shadow the live data dir for every hook, the CLI, and the statusline until the next SessionStart rewrote it.
+
+## Changed
+
+- `prompts/continuation.md` re-synced with upstream Codex `codex-rs` goal templates: continuation-behavior (anti-scope-shrink), work-from-evidence, fidelity (no narrower/safer/easier-to-test substitutions), stricter completion audit ("the audit must prove completion, not merely fail to find obvious remaining work"), and the resumed-blocked fresh-audit rule. Plugin-specific evaluator dispatch and `<untrusted_objective>` hygiene retained.
+- README comparison table refreshed against Claude Code 2.1.206 primary sources: native `/goal` restores its condition on `--resume` (counters reset), defers evaluation while background tasks run, and can fail a goal as impossible.
+
+## Performance
+
+- `sum_transcript` and `last_uuid_before_offset` rewritten as single-pass jq programs. The old loop spawned ~5 jq processes per JSONL line on every PostToolBatch/Stop invocation; a 2,000-line window now accounts in ~40ms with one jq process.
+- Per-session fast-path marker: `create_goal` writes `sessions/<session_id>` under the plugin data dir and the PostToolBatch hook exits before any sqlite/jq work for sessions without a marker. `session-start.sh` heals markers for pre-0.3.0 goals on resume; `/goal-cleanup --delete` reaps them. Installs without a `sessions/` dir fall back to the legacy path (fail open).
+
+## Verification target
+
+- `npm --prefix mcp/goal-server test`
+- `npm --prefix mcp/goal-server run build`
+- `bats $(find tests -name '*.bats' | sort)`
+- `npm --prefix docs run build`
+- `claude plugin validate .`
+- `git diff --check`
+
 # claude-goal v0.2.9
 
 **Blocked goals are recoverable through MCP tools.**

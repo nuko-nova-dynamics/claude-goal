@@ -166,6 +166,7 @@ describe("GoalsRepo.markComplete", () => {
     const g = repo.create({ session_id: "s1", objective: "x", token_budget: null, budget_profile: null });
     repo.pause("s1", g.goal_id, "accounting_error");
     repo["db"].prepare("UPDATE goals SET accounting_uncertain = 1 WHERE session_id = 's1'").run();
+    repo.recordVerdict("s1", g.goal_id, "complete", "verified", null);
 
     repo.markComplete("s1", g.goal_id, "evaluator");
 
@@ -200,6 +201,7 @@ describe("GoalsRepo.markComplete", () => {
     const repo = freshRepo();
     const g = repo.create({ session_id: "s1", objective: "x", token_budget: 1000, budget_profile: null });
     repo.testHelper_setStatus("s1", "budget_limited");
+    repo.recordVerdict("s1", g.goal_id, "complete", "verified", null);
 
     repo.markComplete("s1", g.goal_id, "evaluator");
 

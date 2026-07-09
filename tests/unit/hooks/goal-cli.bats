@@ -22,6 +22,28 @@ teardown() { rm -rf "$TMPDIR_TEST"; }
   [ "$status" -eq 2 ]
 }
 
+@test "stale runtime-data-dir marker pointing at a deleted dir is ignored" {
+  NOW=$(ms_now)
+  sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'real objective', 'active', $NOW, $NOW, $NOW);"
+  # Leak a marker at plugin root that points to a dir that no longer exists.
+  printf '%s' "$TMPDIR_TEST/vanished-tmpdir" > "$CLAUDE_PLUGIN_ROOT/.runtime-data-dir"
+  run "$CLI" status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"real objective"* ]]
+}
+
+@test "valid runtime-data-dir marker still wins over DB_PATH override" {
+  MARKER_DIR="$TMPDIR_TEST/marker-data"
+  mkdir -p "$MARKER_DIR"
+  "$REPO_ROOT/tests/helpers/init-test-db.sh" "$MARKER_DIR/goals.db"
+  NOW=$(ms_now)
+  sqlite3 "$MARKER_DIR/goals.db" "INSERT INTO goals (session_id, goal_id, objective, status, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'marker objective', 'active', $NOW, $NOW, $NOW);"
+  printf '%s' "$MARKER_DIR" > "$CLAUDE_PLUGIN_ROOT/.runtime-data-dir"
+  run "$CLI" status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"marker objective"* ]]
+}
+
 @test "status JSON includes remaining_tokens and bool accounting_uncertain" {
   NOW=$(ms_now)
   sqlite3 "$DB_PATH" "INSERT INTO goals (session_id, goal_id, objective, status, token_budget, budget_source, tokens_used, subagent_tokens, resume_at_ms, created_at_ms, updated_at_ms) VALUES ('test-session', 'g1', 'x', 'active', 1000, 'tokens', 200, 50, $NOW, $NOW, $NOW);"

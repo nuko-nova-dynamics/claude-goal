@@ -13,9 +13,15 @@ source "$SCRIPT_DIR/lib/render-template.sh"
 # Flips the active goal to paused/degraded and exits fail-open.
 trap 'pause_as_degraded "${SESSION_ID:-}" 2>/dev/null; lease_release "${SESSION_ID:-}" $$ 2>/dev/null; echo "{\"systemMessage\":\"goal pursuit degraded; see ${CLAUDE_PLUGIN_DATA:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/data/claude-goal}}/logs/\"}"; exit 0' ERR
 
-# Resolve DB path: marker file > CLAUDE_PLUGIN_DATA > hardcoded fallback
+# Resolve DB path: marker file > CLAUDE_PLUGIN_DATA > hardcoded fallback.
+# The marker target must still exist — a marker leaked by a dev/test run can
+# point at a deleted temp dir and must not shadow the live data dir.
+MARKER_DATA=""
 if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir" ]]; then
-  PLUGIN_DATA=$(cat "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir")
+  MARKER_DATA=$(cat "${CLAUDE_PLUGIN_ROOT}/.runtime-data-dir" 2>/dev/null || echo "")
+fi
+if [[ -n "$MARKER_DATA" && -d "$MARKER_DATA" ]]; then
+  PLUGIN_DATA="$MARKER_DATA"
 elif [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
   PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
 else

@@ -29,6 +29,11 @@ fi
 if [[ -z "$PLUGIN_DATA" ]]; then
   PLUGIN_DATA="$HOME/.claude/plugins/data/claude-goal"
 fi
+# Note: unlike the reader-side resolvers (stop, post-tool-batch, goal-cli,
+# statusline), session-start deliberately trusts a marker whose target is
+# missing — the preflight below recreates the data dir on fresh installs,
+# and when Claude Code invokes this hook the env value wins and the marker
+# is rewritten from it anyway.
 
 DB_PATH="${DB_PATH:-$PLUGIN_DATA/goals.db}"
 
@@ -101,6 +106,12 @@ RESUME_AT=$(printf '%s' "$ROW" | cut -d'|' -f3)
 VERSION=$(printf '%s' "$ROW"  | cut -d'|' -f4)
 
 GOAL_ID_ESC=$(sql_escape "$GOAL_ID")
+
+# Heal the per-session marker used by the post-tool-batch fast-path gate.
+# Covers goals created before the marker mechanism existed (plugin update
+# mid-goal) and marker files lost to cleanup or manual deletion.
+mkdir -p "$PLUGIN_DATA/sessions" 2>/dev/null || true
+touch "$PLUGIN_DATA/sessions/$(printf '%s' "$SESSION_ID" | tr -c 'A-Za-z0-9_.:-' '_')" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Branch on source

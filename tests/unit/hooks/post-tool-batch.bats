@@ -90,3 +90,32 @@ EOF
   run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/post-tool-batch.sh"
   [ "$status" -eq 0 ]
 }
+
+@test "post-tool-batch skips all DB work when sessions dir exists without a marker" {
+  mkdir -p "$TMPDIR_TEST/sessions"
+  # No marker for s1 → hook must exit before accounting.
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"tool_calls\":[]}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/post-tool-batch.sh"
+  [ "$status" -eq 0 ]
+  TOKENS=$(sqlite3 "$DB_PATH" "SELECT tokens_used FROM goals WHERE session_id='s1';")
+  [ "$TOKENS" = "0" ]
+}
+
+@test "post-tool-batch accounts normally when the session marker exists" {
+  mkdir -p "$TMPDIR_TEST/sessions"
+  touch "$TMPDIR_TEST/sessions/s1"
+  INPUT="{\"session_id\":\"s1\",\"transcript_path\":\"$TRANSCRIPT\",\"tool_calls\":[]}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/post-tool-batch.sh"
+  [ "$status" -eq 0 ]
+  TOKENS=$(sqlite3 "$DB_PATH" "SELECT tokens_used FROM goals WHERE session_id='s1';")
+  [ "$TOKENS" = "15" ]
+}
+
+@test "post-tool-batch sanitizes hostile session ids for the marker path" {
+  mkdir -p "$TMPDIR_TEST/sessions"
+  # Slashes are replaced with underscores, so the lookup cannot escape sessions/.
+  touch "$TMPDIR_TEST/sessions/.._.._.._etc_passwd"
+  INPUT="{\"session_id\":\"../../../etc/passwd\",\"transcript_path\":\"$TRANSCRIPT\",\"tool_calls\":[]}"
+  run bash -c "echo '$INPUT' | $REPO_ROOT/scripts/post-tool-batch.sh"
+  [ "$status" -eq 0 ]
+}
